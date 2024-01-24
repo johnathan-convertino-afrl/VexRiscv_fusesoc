@@ -1,0 +1,20 @@
+CAPI=2:
+name : spinalhdl:repo:vexriscv:1.10.0
+
+filesets:
+  dep:
+    depend:
+      - AFRL:utility:generators:1.0.0
+
+generate:
+  gen_git:
+    generator: git_pull
+    parameters:
+      repo_url: https://github.com/SpinalHDL/VexRiscv.git
+      repo_dir: VexRiscv
+      tag: 0effdec
+
+targets:
+  default:
+    filesets: [dep]
+    generate: [gen_git]

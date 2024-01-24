@@ -1,0 +1,26 @@
+CAPI=2:
+name : spinalhdl:cpu:vexriscv_smp_four_core:1.0.0
+
+filesets:
+  rtl:
+    files:
+      - VexRiscv/Verilog/VexRiscvLitexSmpCluster.v
+    file_type : verilogSource
+
+  dep:
+    depend:
+      - spinalhdl:repo:spinalhdl:1.10.0
+      - spinalhdl:repo:vexriscv:1.10.0
+      - AFRL:utility:generators:1.0.0
+
+generate:
+  gen_spinalHDL:
+    generator: spinalhdl
+    parameters:
+      src_dir: VexRiscv
+      build_args: ["runMain", "vexriscv.demo.smp.VexRiscvLitexSmpClusterCmdGen", "--coherent-dma", "--cpu-count=4", "--ibus-width=64", "--dbus-width=64", "--dcache-size=8192", "--icache-size=8192", "--dcache-ways=2", "--icache-ways=2", "--litedram-width=128", "--aes-instruction=False", "--expose-time=False", "--out-of-order-decoder=True", "--privileged-debug=False", "--hardware-breakpoints=0", "--wishbone-memory=False", "--fpu=False", "--cpu-per-fpu=4", "--rvc=False", "--netlist-name=VexRiscvLitexSmpCluster", "--netlist-directory=verilog", "--dtlb-size=4", "--itlb-size=4"]
+
+targets:
+  default:
+    filesets: [rtl, dep]
+    generate: [gen_spinalHDL]

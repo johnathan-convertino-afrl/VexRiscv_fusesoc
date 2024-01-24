@@ -1,0 +1,20 @@
+CAPI=2:
+name : spinalhdl:repo:spinalhdl:1.10.0
+
+filesets:
+  dep:
+    depend:
+      - AFRL:utility:generators:1.0.0
+
+generate:
+  gen_git:
+    generator: git_pull
+    parameters:
+      repo_url: https://github.com/SpinalHDL/SpinalHDL.git
+      repo_dir: SpinalHDL
+      tag: v1.10.0
+
+targets:
+  default:
+    filesets: [dep]
+    generate: [gen_git]
