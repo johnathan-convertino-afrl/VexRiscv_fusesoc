@@ -1,0 +1,26 @@
+CAPI=2:
+name : spinalhdl:cpu:vexriscv_murax_ace:1.0.0
+
+filesets:
+  rtl:
+    files:
+      - cores/Murax_ace/Murax.v
+    file_type : verilogSource
+
+  dep:
+    depend:
+      - spinalhdl:repo:spinalhdl:1.10.0
+      - spinalhdl:repo:vexriscv:1.10.0
+      - AFRL:utility:generators:1.0.0
+
+generate:
+  gen_spinalHDL:
+    generator: spinalhdl
+    parameters:
+      src_dir: cores/Murax_ace
+      build_args: ["runMain", "vexriscv.ace.Murax_Nexys"]
+
+targets:
+  default:
+    filesets: [rtl, dep]
+    generate: [gen_spinalHDL]
