@@ -3,5 +3,7 @@ VexRiscv/
 SpinalHDL/
 project/
 target/
+archives/
+tools/
 *.yaml
 *.v

@@ -1,5 +1,5 @@
 CAPI=2:
-name : spinalhdl:cpu:vexriscv_murax_ace:1.0.0
+name : spinalhdl:cpu:vexriscv_ace_murax:1.0.0
 
 filesets:
   rtl:
