@@ -1,10 +1,10 @@
 CAPI=2:
-name : spinalhdl:cpu:vexriscv_axi4_linux:1.0.0
+name : spinalhdl:cpu:ace_vexriscv_murax_sim:1.0.0
 
 filesets:
   rtl:
     files:
-      - cores/axi4_linux/VexRiscvAxi4LinuxPlicClint.v
+      - cores/ace_murax/Murax.v
     file_type : verilogSource
 
   dep:
@@ -17,8 +17,8 @@ generate:
   gen_spinalHDL:
     generator: spinalhdl
     parameters:
-      src_dir: cores/axi4_linux
-      build_args: ["runMain", "vexriscv.afrl.VexRiscvAxi4LinuxPlicClint"]
+      src_dir: cores/ace_murax
+      build_args: ["runMain", "vexriscv.ace.Murax_Nexys_Sim"]
 
 targets:
   default:
