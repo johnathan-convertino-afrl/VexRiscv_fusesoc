@@ -1,0 +1,26 @@
+CAPI=2:
+name : spinalhdl:cpu:ruffle_axi_io:1.0.0
+
+filesets:
+  rtl:
+    files:
+      - cores/ruffle/ruffle_axi_io.v
+    file_type : verilogSource
+
+  dep:
+    depend:
+      - spinalhdl:repo:spinalhdl:1.10.1
+      - spinalhdl:repo:vexriscv:1.10.1
+      - AFRL:utility:generators:1.0.0
+
+generate:
+  gen_spinalHDL:
+    generator: spinalhdl
+    parameters:
+      src_dir: cores/ruffle
+      build_args: ["runMain", "vexriscv.afrl.Ruffle_Axi_JTAG_IO"]
+
+targets:
+  default:
+    filesets: [rtl, dep]
+    generate: [gen_spinalHDL]
