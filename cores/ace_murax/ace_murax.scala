@@ -4,6 +4,8 @@ import vexriscv.demo._
 import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba3.apb._
+import spinal.lib.bus.amba4.axi._
+import spinal.lib.bus.wishbone._
 import spinal.lib.bus.misc.SizeMapping
 import spinal.lib.bus.simple.PipelinedMemoryBus
 import spinal.lib.com.jtag.Jtag
@@ -57,6 +59,39 @@ case class MuraxConfig(coreFrequency : HertzNumber,
 object Config {
   def spinal = SpinalConfig(
     targetDirectory = "."
+  )
+}
+
+object configBUS {
+  def getAxi4Config() = Axi4Config(
+    addressWidth = 32,
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useQos = false,
+    useLen = false,
+    useResp = true
+  )
+
+  def getWishboneConfig() = WishboneConfig(
+    addressWidth = 30,
+    dataWidth = 32,
+    selWidth = 4,
+    useSTALL = false,
+    useLOCK = false,
+    useERR = true,
+    useRTY = false,
+    tgaWidth = 0,
+    tgcWidth = 0,
+    tgdWidth = 0,
+    useBTE = true,
+    useCTI = true
+  )
+  def getAhbConfig() = Apb3Config(
+    addressWidth = 32,
+    dataWidth = 32
   )
 }
 
@@ -178,6 +213,9 @@ case class Murax(config : MuraxConfig) extends Component{
     val gpioA = master(TriStateArray(gpioWidth bits))
     val uart = master(Uart())
 
+    val m_apb = master(Apb3(configBUS.getAhbConfig()))
+//     val m_axi = master(Axi4(configBUS.getAxi4Config()))
+
     val xip = ifGen(genXip)(master(SpiXdrMaster(xipConfig.ctrl.spi)))
   }
 
@@ -286,7 +324,7 @@ case class Murax(config : MuraxConfig) extends Component{
 
     val apbBridge = new PipelinedMemoryBusToApbBridge(
       apb3Config = Apb3Config(
-        addressWidth = 20,
+        addressWidth = 33,
         dataWidth = 32
       ),
       pipelineBridge = pipelineApbBridge,
@@ -295,12 +333,12 @@ case class Murax(config : MuraxConfig) extends Component{
     mainBusMapping += apbBridge.io.pipelinedMemoryBus -> (0xF0000000l, 1 MB)
 
 
-
     //******** APB peripherals *********
     val apbMapping = ArrayBuffer[(Apb3, SizeMapping)]()
     val gpioACtrl = Apb3Gpio(gpioWidth = gpioWidth, withReadSync = true)
     io.gpioA <> gpioACtrl.io.gpio
     apbMapping += gpioACtrl.io.apb -> (0x00000, 4 kB)
+
 
     val uartCtrl = Apb3UartCtrl(uartCtrlConfig)
     uartCtrl.io.uart <> io.uart
@@ -325,7 +363,7 @@ case class Murax(config : MuraxConfig) extends Component{
       apbMapping += bootloader.io.apb     -> (0x1E000, 4 kB)
     })
 
-
+    apbMapping += io.m_apb -> (0x40000000, 128 MB)
 
     //******** Memory mappings *********
     val apbDecoder = Apb3Decoder(
