@@ -130,6 +130,16 @@ object MuraxConfig{
         earlyInjection = false,
         bigEndian = bigEndian
       ),
+//
+//      Add a boolean above to allow pmp selection during build. ifGen would need to be updated to use new PmpPlugin Example after it.
+//
+//       ifGen(jtag_select != jtag_type.none)(new DebugPlugin(ClockDomain.current.clone(reset = Bool().setName("debugReset")))),
+//
+//      new PmpPlugin(
+//         regions = 16,
+//         ioRange = _(31 downto 28) === 0xf
+//       ),
+//
       new CsrPlugin(CsrPluginConfig.smallest(mtvecInit = if(withXip) 0xE0040020l else 0x80000020l)),
       new DecoderSimplePlugin(
         catchIllegalInstruction = false
