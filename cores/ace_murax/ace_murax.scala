@@ -97,7 +97,7 @@ object configBUS {
 
 object MuraxConfig{
   def default : MuraxConfig = default(false, false)
-  def default(withXip : Boolean = false, bigEndian : Boolean = false) =  MuraxConfig(
+  def default(withXip : Boolean = false, bigEndian : Boolean = false, withPmp : Boolean = false) =  MuraxConfig(
     coreFrequency         = 12 MHz,
     onChipRamSize         = 8 kB,
     onChipRamHexFile      = null,
@@ -130,16 +130,7 @@ object MuraxConfig{
         earlyInjection = false,
         bigEndian = bigEndian
       ),
-//
-//      Add a boolean above to allow pmp selection during build. ifGen would need to be updated to use new PmpPlugin Example after it.
-//
-//       ifGen(jtag_select != jtag_type.none)(new DebugPlugin(ClockDomain.current.clone(reset = Bool().setName("debugReset")))),
-//
-//      new PmpPlugin(
-//         regions = 16,
-//         ioRange = _(31 downto 28) === 0xf
-//       ),
-//
+      ifGen(withPmp)(new PmpPlugin(regions = 16, ioRange = _(31 downto 28) === 0xf)),
       new CsrPlugin(CsrPluginConfig.smallest(mtvecInit = if(withXip) 0xE0040020l else 0x80000020l)),
       new DecoderSimplePlugin(
         catchIllegalInstruction = false
@@ -320,8 +311,6 @@ case class Murax(config : MuraxConfig) extends Component{
       case _ =>
     }
 
-
-
     //****** MainBus slaves ********
     val mainBusMapping = ArrayBuffer[(PipelinedMemoryBus,SizeMapping)]()
     val ram = new MuraxPipelinedMemoryBusRam(
@@ -342,6 +331,7 @@ case class Murax(config : MuraxConfig) extends Component{
     )
     mainBusMapping += apbBridge.io.pipelinedMemoryBus -> (0xF0000000l, 1 MB)
 
+    //add axi bridge here based on above format
 
     //******** APB peripherals *********
     val apbMapping = ArrayBuffer[(Apb3, SizeMapping)]()
@@ -443,6 +433,12 @@ object MuraxCfu{
 object Murax_Nexys{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Murax(MuraxConfig.default(false).copy(coreFrequency = 100 MHz,onChipRamSize = 32 kB,xilinx = true)))
+  }
+}
+
+object Murax_Nexys_Pmp{
+  def main(args: Array[String]) {
+    Config.spinal.generateVerilog(Murax(MuraxConfig.default(withPmp = true).copy(coreFrequency = 100 MHz,onChipRamSize = 32 kB,xilinx = true)))
   }
 }
 
