@@ -90,14 +90,14 @@ object configBUS {
     useCTI = true
   )
   def getAhbConfig() = Apb3Config(
-    addressWidth = 32,
+    addressWidth = 19,
     dataWidth = 32
   )
 }
 
 object MuraxConfig{
   def default : MuraxConfig = default(false, false)
-  def default(withXip : Boolean = false, bigEndian : Boolean = false, withPmp : Boolean = false) =  MuraxConfig(
+  def default(withXip : Boolean = false, bigEndian : Boolean = false) =  MuraxConfig(
     coreFrequency         = 12 MHz,
     onChipRamSize         = 8 kB,
     onChipRamHexFile      = null,
@@ -130,7 +130,6 @@ object MuraxConfig{
         earlyInjection = false,
         bigEndian = bigEndian
       ),
-      ifGen(withPmp)(new PmpPlugin(regions = 16, ioRange = _(31 downto 28) === 0xf)),
       new CsrPlugin(CsrPluginConfig.smallest(mtvecInit = if(withXip) 0xE0040020l else 0x80000020l)),
       new DecoderSimplePlugin(
         catchIllegalInstruction = false
@@ -215,7 +214,6 @@ case class Murax(config : MuraxConfig) extends Component{
     val uart = master(Uart())
 
     val m_apb = master(Apb3(configBUS.getAhbConfig()))
-//     val m_axi = master(Axi4(configBUS.getAxi4Config()))
 
     val xip = ifGen(genXip)(master(SpiXdrMaster(xipConfig.ctrl.spi)))
   }
@@ -323,15 +321,13 @@ case class Murax(config : MuraxConfig) extends Component{
 
     val apbBridge = new PipelinedMemoryBusToApbBridge(
       apb3Config = Apb3Config(
-        addressWidth = 33,
+        addressWidth = 20,
         dataWidth = 32
       ),
       pipelineBridge = pipelineApbBridge,
       pipelinedMemoryBusConfig = pipelinedMemoryBusConfig
     )
     mainBusMapping += apbBridge.io.pipelinedMemoryBus -> (0xF0000000l, 1 MB)
-
-    //add axi bridge here based on above format
 
     //******** APB peripherals *********
     val apbMapping = ArrayBuffer[(Apb3, SizeMapping)]()
@@ -363,7 +359,7 @@ case class Murax(config : MuraxConfig) extends Component{
       apbMapping += bootloader.io.apb     -> (0x1E000, 4 kB)
     })
 
-    apbMapping += io.m_apb -> (0x40000000, 128 MB)
+    apbMapping += io.m_apb -> (0x30000, 4 kB)
 
     //******** Memory mappings *********
     val apbDecoder = Apb3Decoder(
@@ -438,9 +434,14 @@ object Murax_Nexys{
 
 object Murax_Nexys_Pmp{
   def main(args: Array[String]) {
-    Config.spinal.generateVerilog(Murax(MuraxConfig.default(withPmp = true).copy(coreFrequency = 100 MHz,onChipRamSize = 32 kB,xilinx = true)))
+    SpinalVerilog({
+      val config = MuraxConfig.fast.copy(coreFrequency = 100 MHz,onChipRamSize = 32 kB,xilinx = true)
+      config.cpuPlugins += new PmpPlugin(regions = 16, ioRange = _(31 downto 28) === 0xf)
+      Murax(config)
+    })
   }
 }
+
 
 object Murax_Nexys_Sim{
   def main(args: Array[String]) {
