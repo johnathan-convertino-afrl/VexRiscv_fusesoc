@@ -446,7 +446,7 @@ object Murax_Xilinx_Pmp{
   }
 }
 
-object Murax_Nexys_Sim{
+object Murax_Sim{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Murax(MuraxConfig.default(false).copy(coreFrequency = 100 MHz,onChipRamSize = 32 kB)))
   }

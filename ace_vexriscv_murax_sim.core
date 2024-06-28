@@ -18,7 +18,7 @@ generate:
     generator: spinalhdl
     parameters:
       src_dir: cores/ace_murax
-      build_args: ["runMain", "vexriscv.ace.Murax_Nexys_Sim"]
+      build_args: ["runMain", "vexriscv.ace.Murax_Sim"]
 
 targets:
   default:
