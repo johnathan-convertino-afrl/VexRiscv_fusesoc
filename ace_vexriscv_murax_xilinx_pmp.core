@@ -1,5 +1,5 @@
 CAPI=2:
-name : spinalhdl:cpu:ace_vexriscv_murax:1.0.0
+name : spinalhdl:cpu:ace_vexriscv_murax_xilinx_pmp:1.0.0
 
 filesets:
   rtl:
@@ -18,7 +18,7 @@ generate:
     generator: spinalhdl
     parameters:
       src_dir: cores/ace_murax
-      build_args: ["runMain", "vexriscv.ace.Murax_Generic"]
+      build_args: ["runMain", "vexriscv.ace.Murax_Nexys_Xilinx_Pmp"]
 
 targets:
   default:

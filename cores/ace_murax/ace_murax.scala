@@ -42,7 +42,6 @@ case class MuraxConfig(coreFrequency : HertzNumber,
                        onChipRamSize      : BigInt,
                        onChipRamHexFile   : String,
                        pipelineDBus       : Boolean,
-                       sim                : Boolean,
                        xilinx             : Boolean,
                        pipelineMainBus    : Boolean,
                        pipelineApbBridge  : Boolean,
@@ -102,7 +101,6 @@ object MuraxConfig{
     onChipRamSize         = 8 kB,
     onChipRamHexFile      = null,
     pipelineDBus          = true,
-    sim                   = false,
     xilinx                = false,
     pipelineMainBus       = false,
     pipelineApbBridge     = true,
@@ -207,7 +205,7 @@ case class Murax(config : MuraxConfig) extends Component{
     val mainClk = in Bool()
 
     //Main components IO
-    val jtag = ifGen(sim)(slave(Jtag()))
+    val jtag = ifGen(!xilinx)(slave(Jtag()))
 
     //Peripherals IO
     val gpioA = master(TriStateArray(gpioWidth bits))
@@ -298,12 +296,12 @@ case class Murax(config : MuraxConfig) extends Component{
       }
       case plugin : DebugPlugin         => plugin.debugClockDomain{
         resetCtrl.systemReset setWhen(RegNext(plugin.io.resetOut))
-        if(sim)
-          io.jtag <> plugin.io.bus.fromJtag()
-        else if(xilinx) {
+        if(xilinx) {
           val jtagCtrl = JtagTapInstructionCtrl()
           val tap = jtagCtrl.fromXilinxBscane2(userId = 2)
           jtagCtrl <> plugin.io.bus.fromJtagInstructionCtrl(ClockDomain(tap.TCK), 0)
+        } else {
+          io.jtag <> plugin.io.bus.fromJtag()
         }
       }
       case _ =>
@@ -426,13 +424,19 @@ object MuraxCfu{
   }
 }
 
-object Murax_Nexys{
+object Murax_Generic{
+  def main(args: Array[String]) {
+    Config.spinal.generateVerilog(Murax(MuraxConfig.default(false).copy(coreFrequency = 100 MHz,onChipRamSize = 32 kB)))
+  }
+}
+
+object Murax_Xilinx{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Murax(MuraxConfig.default(false).copy(coreFrequency = 100 MHz,onChipRamSize = 32 kB,xilinx = true)))
   }
 }
 
-object Murax_Nexys_Pmp{
+object Murax_Xilinx_Pmp{
   def main(args: Array[String]) {
     SpinalVerilog({
       val config = MuraxConfig.fast.copy(coreFrequency = 100 MHz,onChipRamSize = 32 kB,xilinx = true)
@@ -442,10 +446,9 @@ object Murax_Nexys_Pmp{
   }
 }
 
-
 object Murax_Nexys_Sim{
   def main(args: Array[String]) {
-    Config.spinal.generateVerilog(Murax(MuraxConfig.default(false).copy(coreFrequency = 100 MHz,onChipRamSize = 32 kB,sim = true)))
+    Config.spinal.generateVerilog(Murax(MuraxConfig.default(false).copy(coreFrequency = 100 MHz,onChipRamSize = 32 kB)))
   }
 }
 
