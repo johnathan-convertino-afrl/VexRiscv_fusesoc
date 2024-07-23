@@ -128,7 +128,31 @@ object MuraxConfig{
         earlyInjection = false,
         bigEndian = bigEndian
       ),
-      new CsrPlugin(CsrPluginConfig.smallest(mtvecInit = if(withXip) 0xE0040020l else 0x80000020l)),
+     //new CsrPlugin(CsrPluginConfig.smallest(mtvecInit = if(withXip) 0xE0040020l else 0x80000020l)),
+    	new CsrPlugin(
+        	config = CsrPluginConfig(
+        	catchIllegalAccess = false,
+        	svtecAccess	   = CsrAccess.READ_WRITE,
+        	mvendorid      = null,
+        	marchid        = null,
+        	mimpid         = null,
+        	mhartid        = null,
+        	misaExtensionsInit = 66,
+        	misaAccess     = CsrAccess.NONE,
+        	mtvecAccess    = CsrAccess.NONE,
+        	mtvecInit      = if(withXip) 0xE0040020l else 0x80000020l,
+        	mepcAccess     = CsrAccess.READ_WRITE,
+        	mscratchGen    = false,
+        	mcauseAccess   = CsrAccess.READ_ONLY,
+        	mbadaddrAccess = CsrAccess.READ_ONLY,
+        	mcycleAccess   = CsrAccess.NONE,
+        	minstretAccess = CsrAccess.NONE,
+        	ecallGen       = false,
+        	wfiGenAsWait         = false,
+        	ucycleAccess   = CsrAccess.NONE,
+        	uinstretAccess = CsrAccess.NONE
+        	)
+    	),
       new DecoderSimplePlugin(
         catchIllegalInstruction = false
       ),

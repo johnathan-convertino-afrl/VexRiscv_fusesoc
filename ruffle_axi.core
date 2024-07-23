@@ -1,10 +1,10 @@
 CAPI=2:
-name : spinalhdl:cpu:ruffle_wishbone_bscane:1.0.0
+name : spinalhdl:cpu:ruffle_axi:1.0.0
 
 filesets:
   rtl:
     files:
-      - cores/ruffle/ruffle_wishbone_bscane.v
+      - cores/ruffle/Ruffle.v
     file_type : verilogSource
 
   dep:
@@ -18,7 +18,7 @@ generate:
     generator: spinalhdl
     parameters:
       src_dir: cores/ruffle
-      build_args: ["runMain", "vexriscv.afrl.Ruffle_Wishbone_Xilinx_Bscane"]
+      build_args: ["runMain", "vexriscv.afrl.Ruffle_Axi"]
 
 targets:
   default:

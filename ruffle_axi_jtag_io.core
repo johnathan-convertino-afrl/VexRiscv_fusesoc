@@ -1,10 +1,10 @@
 CAPI=2:
-name : spinalhdl:cpu:ruffle_wishbone_io:1.0.0
+name : spinalhdl:cpu:ruffle_axi_jtag_io:1.0.0
 
 filesets:
   rtl:
     files:
-      - cores/ruffle/ruffle_wishbone_io.v
+      - cores/ruffle/Ruffle.v
     file_type : verilogSource
 
   dep:
@@ -18,7 +18,7 @@ generate:
     generator: spinalhdl
     parameters:
       src_dir: cores/ruffle
-      build_args: ["runMain", "vexriscv.afrl.Ruffle_Wishbone_JTAG_IO"]
+      build_args: ["runMain", "vexriscv.afrl.Ruffle_Axi_JTAG_IO"]
 
 targets:
   default:

@@ -2,18 +2,101 @@ package vexriscv.afrl
 
 import spinal.core._
 import spinal.lib._
-import spinal.lib.bus.amba4.axi.{Axi4ReadOnly, Axi4SpecRenamer}
+import spinal.lib.misc.Clint
+import spinal.lib.bus.amba4.axi._
 import spinal.lib.bus.amba4.axilite.AxiLite4SpecRenamer
-import spinal.lib.misc.AxiLite4Clint
-import spinal.lib.misc.plic.AxiLite4Plic
+import spinal.lib.misc.plic._
 import spinal.lib.com.jtag.{Jtag, JtagTapInstructionCtrl}
 import spinal.lib.eda.altera.{InterruptReceiverTag, ResetEmitterTag}
-import spinal.lib.misc.WishboneClint
-import spinal.lib.misc.plic.WishbonePlic
-import spinal.lib.bus.wishbone.{Wishbone, WishboneConfig}
+import spinal.lib.bus.wishbone._
+import spinal.lib.io.TriStateArray
+import spinal.lib.cpu.riscv.RiscvHart
 import vexriscv.ip.{DataCacheConfig, InstructionCacheConfig}
 import vexriscv.plugin._
 import vexriscv.{Riscv, VexRiscv, VexRiscvConfig, plugin}
+
+object Config {
+  def spinal = SpinalConfig(
+    targetDirectory = "."
+  )
+}
+
+object configBUS {
+  def getAxi4Config() = Axi4Config(
+    addressWidth = 32,
+    dataWidth = 32,
+    idWidth = 2,
+    useId = true,
+    useRegion = true,
+    useBurst = true,
+    useLock = false,
+    useQos = false,
+    useLen = true,
+    useResp = false
+  )
+}
+
+case class Axi4Clint(hartCount : Int, bufferTime : Boolean = false) extends Component{
+  val io = new Bundle {
+    val bus = slave(Axi4(configBUS.getAxi4Config()))
+    val timerInterrupt = out Bits(hartCount bits)
+    val softwareInterrupt = out Bits(hartCount bits)
+    val time = out UInt(64 bits)
+  }
+
+  val factory = new Axi4SlaveFactory(io.bus)
+  val logic = Clint(0 until hartCount)
+  logic.driveFrom(factory, bufferTime)
+
+  for(hartId <- 0 until hartCount){
+    io.timerInterrupt(hartId) := logic.harts(hartId).timerInterrupt
+    io.softwareInterrupt(hartId) := logic.harts(hartId).softwareInterrupt
+  }
+
+  io.time := logic.time
+}
+
+
+class Axi4Plic(sourceCount : Int, targetCount : Int) extends Component{
+  val priorityWidth = 2
+  val plicMapping = PlicMapping.sifive
+  import plicMapping._
+
+  val io = new Bundle {
+    val bus = slave(Axi4(configBUS.getAxi4Config()))
+    val sources = in Bits (sourceCount bits)
+    val targets = out Bits (targetCount bits)
+  }
+
+  val gateways = (for ((source, id) <- (io.sources.asBools, 1 to sourceCount).zipped) yield PlicGatewayActiveHigh(
+    source = source,
+    id = id,
+    priorityWidth = priorityWidth
+  )).toSeq
+
+  val targets = for (i <- 0 until targetCount) yield PlicTarget(
+    id = i,
+    gateways = gateways,
+    priorityWidth = priorityWidth
+  )
+
+  io.targets := targets.map(_.iep).asBits
+
+  val bus = new Axi4SlaveFactory(io.bus)
+  val mapping = PlicMapper(bus, plicMapping)(
+    gateways = gateways,
+    targets = targets
+  )
+}
+
+case class Axi4Output(axiConfig : Axi4Config) extends Component{
+  val io = new Bundle {
+    val input  = slave(Axi4Shared(axiConfig))
+    val output = master(Axi4(axiConfig))
+  }
+
+  io.output <> io.input.toAxi4()
+}
 
 sealed trait jtag_type
 object jtag_type {
@@ -23,8 +106,7 @@ object jtag_type {
 }
 
 object RuffleBaseConfig{
-  def gen(name : String,
-          jtag_select : jtag_type) = {
+  def gen(debugClockDomain : ClockDomain, jtag_select : jtag_type) = {
       //CPU configuration
       VexRiscvConfig(
         plugins = List(
@@ -105,160 +187,182 @@ object RuffleBaseConfig{
             pessimisticWriteRegFile = false,
             pessimisticAddressMatch = false
           ),
-          ifGen(jtag_select != jtag_type.none)(new DebugPlugin(ClockDomain.current.clone(reset = Bool().setName("debugReset")))),
           new BranchPlugin(
             earlyBranch = false,
             catchAddressMisaligned = true
           ),
-//           new CsrPlugin(CsrPluginConfig.linuxMinimal(0x80000020l).copy(ebreakGen = false)),
-          new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"ima")).copy(utimeAccess = CsrAccess.READ_ONLY)),
-          new YamlPlugin(name + "_cpu0.yaml")
+          ifGen(jtag_select != none)(new DebugPlugin(debugClockDomain)),
+          new CsrPlugin(CsrPluginConfig.linuxFull(0x80000020l).copy(ebreakGen = false)),
+//           new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"ima")).copy(utimeAccess = CsrAccess.READ_ONLY)),
+          new YamlPlugin("ruffle_cpu0.yaml")
         )
       )
   }
 }
 
 
-object Ruffle{
-  def wishbone( name : String,
-                jtag_select : jtag_type) = {
-    //CPU instanciation
-    val cpu = new VexRiscv(RuffleBaseConfig.gen(name, jtag_select)){
-        val clintCtrl = new WishboneClint(1)
-        val plicCtrl  = new WishbonePlic(sourceCount = 31, targetCount = 2)
+case class Ruffle (jtag_select : jtag_type) extends Component {
 
-        val clint = clintCtrl.io.bus.toIo()
-        val plic = plicCtrl.io.bus.toIo()
-        val plicInterrupts = in Bits(32 bits)
-        plicCtrl.io.sources := plicInterrupts >> 1
+    val io = new Bundle {
+      val aclk  = in Bool()
+      val arst  = in Bool()
+      val jtag  = ifGen(jtag_select == jtag_type.io)(slave(Jtag()))
+
+      val irq   = in Bits(32 bits)
+
+      val m_axi_mbus = master(Axi4(configBUS.getAxi4Config()))
+      val m_axi_dbus = master(Axi4(configBUS.getAxi4Config()))
     }
 
-    //CPU modifications to be an Avalon one
-    cpu.setDefinitionName(name)
-    cpu.rework {
-      for (plugin <- cpu.plugins) plugin match {
-        case plugin: IBusCachedPlugin => {
-          plugin.iBus.setAsDirectionLess() //Unset IO properties of iBus
-          master(plugin.iBus.toWishbone())
-          .setName("wb_cpu_ibus")
-          .addTag(ClockDomainTag(ClockDomain.current))
-        }
-        case plugin: DBusCachedPlugin => {
-          plugin.dBus.setAsDirectionLess()
-          master(plugin.dBus.toWishbone())
-          .setName("wb_cpu_dbus")
-          .addTag(ClockDomainTag(ClockDomain.current))
-        }
-        case plugin: DebugPlugin => plugin.debugClockDomain {
-          plugin.io.bus.setAsDirectionLess()
-          jtag_select match {
-            case jtag_type.io => {
-              val jtag = slave(new Jtag()).setName("jtag")
-              jtag <> plugin.io.bus.fromJtag()
-            }
-            case jtag_type.xilinx_bscane => {
-              val jtagCtrl = JtagTapInstructionCtrl()
-              val tap = jtagCtrl.fromXilinxBscane2(userId = 2)
-              jtagCtrl <> plugin.io.bus.fromJtagInstructionCtrl(ClockDomain(tap.TCK), 0)
-            }
-            case _ =>
-          }
-        }
-        case plugin: CsrPlugin => {
-          plugin.timerInterrupt     setAsDirectionLess() := cpu.clintCtrl.io.timerInterrupt(0)
-          plugin.softwareInterrupt  setAsDirectionLess() := cpu.clintCtrl.io.softwareInterrupt(0)
-          plugin.externalInterrupt  setAsDirectionLess() := cpu.plicCtrl.io.targets(0)
-          plugin.externalInterruptS setAsDirectionLess() := cpu.plicCtrl.io.targets(1)
-          plugin.utime              setAsDirectionLess() := cpu.clintCtrl.io.time
-        }
-        case _ =>
+    val resetCtrlClockDomain = ClockDomain(
+      clock = io.aclk,
+      config = ClockDomainConfig(
+        resetKind = BOOT
+      )
+    )
+
+    val resetCtrl = new ClockingArea(resetCtrlClockDomain) {
+      val systemResetUnbuffered  = False
+      //    val coreResetUnbuffered = False
+
+      //Implement an counter to keep the reset axiResetOrder high 64 cycles
+      // Also this counter will automaticly do a reset when the system boot.
+      val systemResetCounter = Reg(UInt(6 bits)) init(0)
+      when(systemResetCounter =/= U(systemResetCounter.range -> true)){
+        systemResetCounter := systemResetCounter + 1
+        systemResetUnbuffered := True
       }
-    }
-    cpu
-  }
-  def axi( name : String,
-           jtag_select : jtag_type) = {
-           //   //CPU instanciation
-    val cpu = new VexRiscv(RuffleBaseConfig.gen(name, jtag_select)){
-        val clintCtrl = new AxiLite4Clint(1, bufferTime = false)
-        val plicCtrl  = new AxiLite4Plic(sourceCount = 31, targetCount = 2)
-
-        val clint = clintCtrl.io.bus.toIo()
-        val plic = plicCtrl.io.bus.toIo()
-        val plicInterrupts = in Bits(32 bits)
-        plicCtrl.io.sources := plicInterrupts >> 1
-
-        AxiLite4SpecRenamer(clint .setName("s_axi_clint"))
-        AxiLite4SpecRenamer(plic  .setName("s_axi_plic"))
-    }
-
-    //CPU modifications to be an Avalon one
-    cpu.setDefinitionName(name)
-    cpu.rework {
-      for (plugin <- cpu.plugins) plugin match {
-        case plugin: IBusCachedPlugin => {
-          plugin.iBus.setAsDirectionLess() //Unset IO properties of iBus
-          Axi4SpecRenamer(
-          master(plugin.iBus.toAxi4ReadOnly().toFullConfig())
-            .setName("m_axi_ibus")
-            .addTag(ClockDomainTag(ClockDomain.current)))
-        }
-        case plugin: DBusCachedPlugin => {
-          plugin.dBus.setAsDirectionLess()
-          Axi4SpecRenamer(
-          master(plugin.dBus.toAxi4Shared().toAxi4().toFullConfig())
-            .setName("m_axi_dbus")
-            .addTag(ClockDomainTag(ClockDomain.current)))
-        }
-        case plugin: DebugPlugin => plugin.debugClockDomain {
-          plugin.io.bus.setAsDirectionLess()
-          jtag_select match {
-            case jtag_type.io => {
-              val jtag = slave(new Jtag()).setName("jtag")
-              jtag <> plugin.io.bus.fromJtag()
-            }
-            case jtag_type.xilinx_bscane => {
-              val jtagCtrl = JtagTapInstructionCtrl()
-              val tap = jtagCtrl.fromXilinxBscane2(userId = 2)
-              jtagCtrl <> plugin.io.bus.fromJtagInstructionCtrl(ClockDomain(tap.TCK), 0)
-            }
-            case _ =>
-          }
-        }
-        case plugin: CsrPlugin => {
-          plugin.timerInterrupt     setAsDirectionLess() := cpu.clintCtrl.io.timerInterrupt(0)
-          plugin.softwareInterrupt  setAsDirectionLess() := cpu.clintCtrl.io.softwareInterrupt(0)
-          plugin.externalInterrupt  setAsDirectionLess() := cpu.plicCtrl.io.targets(0)
-          plugin.externalInterruptS setAsDirectionLess() := cpu.plicCtrl.io.targets(1)
-          plugin.utime              setAsDirectionLess() := cpu.clintCtrl.io.time
-        }
-        case _ =>
+      when(BufferCC(io.arstn)){
+        systemResetCounter := 0
       }
+
+      //Create all reset used later in the design
+      val srst  = RegNext(systemResetUnbuffered)
+      val arst  = RegNext(systemResetUnbuffered)
     }
-    cpu
-  }
+
+    val axiClockDomain = ClockDomain(
+      clock = io.aclk,
+      reset = resetCtrl.arst
+    )
+
+    val debugClockDomain = ClockDomain(
+      clock = io.aclk,
+      reset = resetCtrl.srst
+    )
+
+    val axi = new ClockingArea(axiClockDomain) {
+      val ram = Axi4SharedOnChipRam(
+        dataWidth = 32,
+        byteCount = 512 kB,
+        idWidth = 4
+      )
+
+      val axi4dbus = Axi4Output(configBUS.getAxi4Config())
+      val axi4mbus = Axi4Output(configBUS.getAxi4Config())
+
+      val clintCtrl = new Axi4Clint(1)
+      val plicCtrl  = new Axi4Plic(sourceCount = 32, targetCount = 2)
+
+      val core = new Area{
+
+        val cpu = new VexRiscv(RuffleBaseConfig.gen(debugClockDomain, jtag_select))
+        var iBus : Axi4ReadOnly = null
+        var dBus : Axi4Shared = null
+
+        for (plugin <- cpu.plugins) plugin match {
+          case plugin: IBusCachedPlugin => iBus = plugin.iBus.toAxi4ReadOnly()
+          case plugin: DBusCachedPlugin => dBus = plugin.dBus.toAxi4Shared(true)
+          case plugin: DebugPlugin => debugClockDomain {
+            jtag_select match {
+              case jtag_type.io => {
+                val jtag = slave(new Jtag()).setName("jtag")
+                io.jtag <> plugin.io.bus.fromJtag()
+              }
+              case jtag_type.xilinx_bscane => {
+                val jtagCtrl = JtagTapInstructionCtrl()
+                val tap = jtagCtrl.fromXilinxBscane2(userId = 2)
+                jtagCtrl <> plugin.io.bus.fromJtagInstructionCtrl(ClockDomain(tap.TCK), 0)
+              }
+              case _ =>
+            }
+          }
+          case plugin: CsrPlugin => {
+            plugin.timerInterrupt     := clintCtrl.io.timerInterrupt(0)
+            plugin.softwareInterrupt  := clintCtrl.io.softwareInterrupt(0)
+            plugin.externalInterrupt  := plicCtrl.io.targets(0)
+            plugin.externalInterruptS := plicCtrl.io.targets(1)
+            plugin.utime              := clintCtrl.io.time
+          }
+          case _ =>
+        }
+      }
+
+      val axiCrossbar = Axi4CrossbarFactory()
+
+      axiCrossbar.addSlaves(
+        ram.io.axi          -> (0x80000000L,   512 kB),
+        clintCtrl.io.bus    -> (0x02000000L,    48 kB),
+        plicCtrl.io.bus     -> (0x0C000000L,     4 MB),
+        axi4dbus.io.input   -> (0x40000000L,     1 GB),
+        axi4mbus.io.input   -> (0x90000000L,     1 GB)
+      )
+
+      axiCrossbar.addConnections(
+        core.iBus       -> List(ram.io.axi, axi4mbus.io.input),
+        core.dBus       -> List(ram.io.axi, clintCtrl.io.bus, plicCtrl.io.bus, axi4dbus.io.input, axi4mbus.io.input)
+      )
+
+      axiCrossbar.addPipelining(axi4mbus.io.input)((crossbar,ctrl) => {
+        crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
+        crossbar.writeData            >/-> ctrl.writeData
+        crossbar.writeRsp              <<  ctrl.writeRsp
+        crossbar.readRsp               <<  ctrl.readRsp
+      })
+
+      axiCrossbar.addPipelining(axi4dbus.io.input)((crossbar,ctrl) => {
+        crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
+        crossbar.writeData            >/-> ctrl.writeData
+        crossbar.writeRsp              <<  ctrl.writeRsp
+        crossbar.readRsp               <<  ctrl.readRsp
+      })
+
+      axiCrossbar.addPipelining(ram.io.axi)((crossbar,ctrl) => {
+        crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
+        crossbar.writeData            >/-> ctrl.writeData
+        crossbar.writeRsp              <<  ctrl.writeRsp
+        crossbar.readRsp               <<  ctrl.readRsp
+      })
+
+      axiCrossbar.addPipelining(core.dBus)((cpu,crossbar) => {
+        cpu.sharedCmd             >>  crossbar.sharedCmd
+        cpu.writeData             >>  crossbar.writeData
+        cpu.writeRsp              <<  crossbar.writeRsp
+        cpu.readRsp               <-< crossbar.readRsp //Data cache directly use read responses without buffering, so pipeline it for FMax
+      })
+
+      axiCrossbar.build()
+    }
+
+    io.m_axi_dbus     <> axi.axi4dbus.io.output
+    io.m_axi_mbus     <> axi.axi4mbus.io.output
+    io.irq            <> axi.plicCtrl.io.sources
 }
 
-object Ruffle_Wishbone_JTAG_IO{
+object Ruffle_Axi_JTAG_Xilinx_Bscane{
   def main(args: Array[String]) {
-    SpinalVerilog(Ruffle.wishbone(name = "ruffle_wishbone_io", jtag_select = jtag_type.io))
-  }
-}
-
-object Ruffle_Wishbone_Xilinx_Bscane{
-  def main(args: Array[String]) {
-    SpinalVerilog(Ruffle.wishbone(name = "ruffle_wishbone_bscane", jtag_select = jtag_type.xilinx_bscane))
-  }
-}
-
-object Ruffle_Axi_Xilinx_Bscane{
-  def main(args: Array[String]) {
-    SpinalVerilog(Ruffle.axi(name = "ruffle_axi_bscane", jtag_select = jtag_type.xilinx_bscane))
+    Config.spinal.generateVerilog(Ruffle(jtag_select = jtag_type.xilinx_bscane))
   }
 }
 
 object Ruffle_Axi_JTAG_IO{
   def main(args: Array[String]) {
-    SpinalVerilog(Ruffle.axi(name = "ruffle_axi_io", jtag_select = jtag_type.io))
+    Config.spinal.generateVerilog(Ruffle(jtag_select = jtag_type.io))
+  }
+}
+
+object Ruffle_Axi{
+  def main(args: Array[String]) {
+    Config.spinal.generateVerilog(Ruffle(jtag_select = jtag_type.none))
   }
 }
