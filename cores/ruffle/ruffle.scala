@@ -4,7 +4,7 @@ import spinal.core._
 import spinal.lib._
 import spinal.lib.misc.Clint
 import spinal.lib.bus.amba4.axi._
-import spinal.lib.bus.amba4.axilite.AxiLite4SpecRenamer
+import spinal.lib.bus.amba4.axilite._
 import spinal.lib.misc.plic._
 import spinal.lib.com.jtag.{Jtag, JtagTapInstructionCtrl}
 import spinal.lib.eda.altera.{InterruptReceiverTag, ResetEmitterTag}
@@ -25,7 +25,7 @@ object configBUS {
   def getAxi4Config() = Axi4Config(
     addressWidth = 32,
     dataWidth = 32,
-    idWidth = 2,
+    idWidth = 4,
     useId = true,
     useRegion = true,
     useBurst = true,
@@ -33,6 +33,11 @@ object configBUS {
     useQos = false,
     useLen = true,
     useResp = false
+  )
+    
+  def getAxiLite4Config() = AxiLite4Config(
+    addressWidth = 32,
+    dataWidth = 32
   )
 }
 
@@ -87,6 +92,23 @@ class Axi4Plic(sourceCount : Int, targetCount : Int) extends Component{
     gateways = gateways,
     targets = targets
   )
+}
+
+//maybe do this, toAxi4() to toAxiLite4()?
+case class AxiLite4Output(axiConfig : Axi4Config) extends Component{
+  val io = new Bundle {
+    val input  = slave(Axi4Shared(axiConfig))
+    val output = master(AxiLite4(AxiLite4Config(
+                              addressWidth = axiConfig.addressWidth,
+                              dataWidth = axiConfig.dataWidth,
+                              readIssuingCapability = axiConfig.readIssuingCapability,
+                              writeIssuingCapability = axiConfig.writeIssuingCapability,
+                              combinedIssuingCapability = axiConfig.combinedIssuingCapability,
+                              readDataReorderingDepth = axiConfig.readDataReorderingDepth
+    )))
+  }
+
+  io.output <> AxiLite4Utils.Axi4Rich(io.input.toAxi4()).toLite()
 }
 
 case class Axi4Output(axiConfig : Axi4Config) extends Component{
@@ -191,9 +213,9 @@ object RuffleBaseConfig{
             earlyBranch = false,
             catchAddressMisaligned = true
           ),
-          ifGen(jtag_select != none)(new DebugPlugin(debugClockDomain)),
-          new CsrPlugin(CsrPluginConfig.linuxFull(0x80000020l).copy(ebreakGen = false)),
-//           new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"ima")).copy(utimeAccess = CsrAccess.READ_ONLY)),
+          ifGen(jtag_select != jtag_type.none)(new DebugPlugin(debugClockDomain)),
+          //new CsrPlugin(CsrPluginConfig.linuxFull(0x80000020l).copy(ebreakGen = false)),
+          new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"ima")).copy(utimeAccess = CsrAccess.READ_ONLY)),
           new YamlPlugin("ruffle_cpu0.yaml")
         )
       )
@@ -211,7 +233,13 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
       val irq   = in Bits(32 bits)
 
       val m_axi_mbus = master(Axi4(configBUS.getAxi4Config()))
-      val m_axi_dbus = master(Axi4(configBUS.getAxi4Config()))
+
+      val m_axi_acc  = master(AxiLite4(configBUS.getAxiLite4Config()))
+      val m_axi_gpio = master(AxiLite4(configBUS.getAxiLite4Config()))
+      val m_axi_uart = master(AxiLite4(configBUS.getAxiLite4Config()))
+      val m_axi_spi  = master(AxiLite4(configBUS.getAxiLite4Config()))
+      val m_axi_qspi = master(AxiLite4(configBUS.getAxiLite4Config()))
+      val m_axi_eth  = master(AxiLite4(configBUS.getAxiLite4Config()))
     }
 
     val resetCtrlClockDomain = ClockDomain(
@@ -232,7 +260,7 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
         systemResetCounter := systemResetCounter + 1
         systemResetUnbuffered := True
       }
-      when(BufferCC(io.arstn)){
+      when(BufferCC(io.arst)){
         systemResetCounter := 0
       }
 
@@ -257,8 +285,14 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
         byteCount = 512 kB,
         idWidth = 4
       )
+ 
+      val axi4acc  = AxiLite4Output(configBUS.getAxi4Config())
+      val axi4gpio = AxiLite4Output(configBUS.getAxi4Config())
+      val axi4uart = AxiLite4Output(configBUS.getAxi4Config())
+      val axi4spi  = AxiLite4Output(configBUS.getAxi4Config())
+      val axi4qspi = AxiLite4Output(configBUS.getAxi4Config())
+      val axi4eth  = AxiLite4Output(configBUS.getAxi4Config())
 
-      val axi4dbus = Axi4Output(configBUS.getAxi4Config())
       val axi4mbus = Axi4Output(configBUS.getAxi4Config())
 
       val clintCtrl = new Axi4Clint(1)
@@ -304,23 +338,21 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
         ram.io.axi          -> (0x80000000L,   512 kB),
         clintCtrl.io.bus    -> (0x02000000L,    48 kB),
         plicCtrl.io.bus     -> (0x0C000000L,     4 MB),
-        axi4dbus.io.input   -> (0x40000000L,     1 GB),
+        axi4acc.io.input    -> (0x70000000L,   256 MB),
+        axi4gpio.io.input   -> (0x40000000L,    64 kB),
+        axi4uart.io.input   -> (0x40600000L,    64 kB),
+        axi4spi.io.input    -> (0x44A20000L,    64 kB),
+        axi4qspi.io.input   -> (0x44A10000L,    64 kB),
+        axi4eth.io.input    -> (0x40E00000L,    64 kB),
         axi4mbus.io.input   -> (0x90000000L,     1 GB)
       )
 
       axiCrossbar.addConnections(
         core.iBus       -> List(ram.io.axi, axi4mbus.io.input),
-        core.dBus       -> List(ram.io.axi, clintCtrl.io.bus, plicCtrl.io.bus, axi4dbus.io.input, axi4mbus.io.input)
+        core.dBus       -> List(ram.io.axi, clintCtrl.io.bus, plicCtrl.io.bus, axi4acc.io.input, axi4gpio.io.input, axi4uart.io.input, axi4spi.io.input, axi4qspi.io.input, axi4eth.io.input, axi4mbus.io.input)
       )
 
       axiCrossbar.addPipelining(axi4mbus.io.input)((crossbar,ctrl) => {
-        crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
-        crossbar.writeData            >/-> ctrl.writeData
-        crossbar.writeRsp              <<  ctrl.writeRsp
-        crossbar.readRsp               <<  ctrl.readRsp
-      })
-
-      axiCrossbar.addPipelining(axi4dbus.io.input)((crossbar,ctrl) => {
         crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
         crossbar.writeData            >/-> ctrl.writeData
         crossbar.writeRsp              <<  ctrl.writeRsp
@@ -344,7 +376,22 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
       axiCrossbar.build()
     }
 
-    io.m_axi_dbus     <> axi.axi4dbus.io.output
+    AxiLite4SpecRenamer(master(io.m_axi_acc)  .setName("m_axi_acc"))
+    AxiLite4SpecRenamer(master(io.m_axi_gpio) .setName("m_axi_gpio"))
+    AxiLite4SpecRenamer(master(io.m_axi_uart) .setName("m_axi_uart"))
+    AxiLite4SpecRenamer(master(io.m_axi_spi)  .setName("m_axi_spi"))
+    AxiLite4SpecRenamer(master(io.m_axi_qspi) .setName("m_axi_qspi"))
+    AxiLite4SpecRenamer(master(io.m_axi_eth)  .setName("m_axi_eth"))
+
+    Axi4SpecRenamer(master(io.m_axi_mbus) .setName("m_axi_mbus"))
+
+    io.m_axi_acc      <> axi.axi4acc.io.output
+    io.m_axi_gpio     <> axi.axi4gpio.io.output
+    io.m_axi_uart     <> axi.axi4uart.io.output
+    io.m_axi_spi      <> axi.axi4spi.io.output
+    io.m_axi_qspi     <> axi.axi4qspi.io.output
+    io.m_axi_eth      <> axi.axi4eth.io.output
+
     io.m_axi_mbus     <> axi.axi4mbus.io.output
     io.irq            <> axi.plicCtrl.io.sources
 }
