@@ -222,12 +222,14 @@ object RuffleBaseConfig{
   }
 }
 
-
 case class Ruffle (jtag_select : jtag_type) extends Component {
 
     val io = new Bundle {
       val aclk  = in Bool()
-      val arst  = in Bool()
+      val arstn = in Bool()
+
+      val ddr_clk = in Bool()
+
       val jtag  = ifGen(jtag_select == jtag_type.io)(slave(Jtag()))
 
       val irq   = in Bits(32 bits)
@@ -251,7 +253,6 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
 
     val resetCtrl = new ClockingArea(resetCtrlClockDomain) {
       val systemResetUnbuffered  = False
-      //    val coreResetUnbuffered = False
 
       //Implement an counter to keep the reset axiResetOrder high 64 cycles
       // Also this counter will automaticly do a reset when the system boot.
@@ -260,18 +261,23 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
         systemResetCounter := systemResetCounter + 1
         systemResetUnbuffered := True
       }
-      when(BufferCC(io.arst)){
+
+      when(BufferCC(io.arstn) === False){
         systemResetCounter := 0
       }
 
       //Create all reset used later in the design
       val srst  = RegNext(systemResetUnbuffered)
-      val arst  = RegNext(systemResetUnbuffered)
     }
 
     val axiClockDomain = ClockDomain(
       clock = io.aclk,
-      reset = resetCtrl.arst
+      reset = resetCtrl.srst
+    )
+
+    val ddrClockDomain = ClockDomain(
+      clock = io.ddr_clk,
+      reset = resetCtrl.srst
     )
 
     val debugClockDomain = ClockDomain(
@@ -293,7 +299,7 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
       val axi4qspi = AxiLite4Output(configBUS.getAxi4Config())
       val axi4eth  = AxiLite4Output(configBUS.getAxi4Config())
 
-      val axi4mbus = Axi4Output(configBUS.getAxi4Config())
+      val axi4mbus = Axi4CC(configBUS.getAxi4Config(), axiClockDomain, ddrClockDomain, 16, 16, 16, 16, 16)
 
       val clintCtrl = new Axi4Clint(1)
       val plicCtrl  = new Axi4Plic(sourceCount = 32, targetCount = 2)
@@ -351,13 +357,6 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
         core.iBus       -> List(ram.io.axi, axi4mbus.io.input),
         core.dBus       -> List(ram.io.axi, clintCtrl.io.bus, plicCtrl.io.bus, axi4acc.io.input, axi4gpio.io.input, axi4uart.io.input, axi4spi.io.input, axi4qspi.io.input, axi4eth.io.input, axi4mbus.io.input)
       )
-
-      axiCrossbar.addPipelining(axi4mbus.io.input)((crossbar,ctrl) => {
-        crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
-        crossbar.writeData            >/-> ctrl.writeData
-        crossbar.writeRsp              <<  ctrl.writeRsp
-        crossbar.readRsp               <<  ctrl.readRsp
-      })
 
       axiCrossbar.addPipelining(ram.io.axi)((crossbar,ctrl) => {
         crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
