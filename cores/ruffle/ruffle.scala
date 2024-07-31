@@ -105,7 +105,7 @@ class Axi4Plic(sourceCount : Int, targetCount : Int) extends Component{
   )
 }
 
-//maybe do this, toAxi4() to toAxiLite4()?
+//axi lite connection
 case class AxiLite4Output(axiConfig : Axi4Config) extends Component{
   val io = new Bundle {
     val input  = slave(Axi4Shared(axiConfig))
@@ -122,6 +122,7 @@ case class AxiLite4Output(axiConfig : Axi4Config) extends Component{
   io.output <> AxiLite4Utils.Axi4Rich(io.input.toAxi4()).toLite()
 }
 
+//axi connection
 case class Axi4Output(axiConfig : Axi4Config) extends Component{
   val io = new Bundle {
     val input  = slave(Axi4Shared(axiConfig))
@@ -241,15 +242,19 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
 
       val ddr_clk = in Bool()
 
-      val s_axi_dma_aclk   = in Bool()
-      val s_axi_dma_arstn  = in Bool()
+      val s_axi_dma0_aclk   = in Bool()
+      val s_axi_dma0_arstn  = in Bool()
+
+      val s_axi_dma1_aclk   = in Bool()
+      val s_axi_dma1_arstn  = in Bool()
 
       val jtag  = ifGen(jtag_select == jtag_type.io)(slave(Jtag()))
 
       val irq   = in Bits(32 bits)
 
       val m_axi_mbus = master(Axi4(configBUS.getAxi4Config()))
-      val s_axi_dma = slave(Axi4(configBUS.getAxi4ConfigNoID()))
+      val s_axi_dma0 = slave(Axi4(configBUS.getAxi4ConfigNoID()))
+      val s_axi_dma1 = slave(Axi4(configBUS.getAxi4ConfigNoID()))
 
       val m_axi_acc  = master(AxiLite4(configBUS.getAxiLite4Config()))
       val m_axi_gpio = master(AxiLite4(configBUS.getAxiLite4Config()))
@@ -257,6 +262,7 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
       val m_axi_spi  = master(AxiLite4(configBUS.getAxiLite4Config()))
       val m_axi_qspi = master(AxiLite4(configBUS.getAxiLite4Config()))
       val m_axi_eth  = master(AxiLite4(configBUS.getAxiLite4Config()))
+      val m_axi_sd   = master(AxiLite4(configBUS.getAxiLite4Config()))
     }
 
     val resetCtrlClockDomain = ClockDomain(
@@ -295,9 +301,14 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
       reset = resetCtrl.srst
     )
 
-    val axiSlaveDmaClockDomain = ClockDomain(
-      clock = io.s_axi_dma_aclk,
-      reset = io.s_axi_dma_arstn
+    val axiSlaveDma0ClockDomain = ClockDomain(
+      clock = io.s_axi_dma0_aclk,
+      reset = io.s_axi_dma0_arstn
+    )
+
+    val axiSlaveDma1ClockDomain = ClockDomain(
+      clock = io.s_axi_dma1_aclk,
+      reset = io.s_axi_dma1_arstn
     )
 
     val debugClockDomain = ClockDomain(
@@ -318,10 +329,13 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
       val axi4spi  = AxiLite4Output(configBUS.getAxi4Config())
       val axi4qspi = AxiLite4Output(configBUS.getAxi4Config())
       val axi4eth  = AxiLite4Output(configBUS.getAxi4Config())
+      val axi4sd   = AxiLite4Output(configBUS.getAxi4Config())
 
       val axi4mbus = Axi4CC(configBUS.getAxi4Config(), axiClockDomain, ddrClockDomain, 16, 16, 16, 16, 16)
 
-      val axi4dma = Axi4CC(configBUS.getAxi4ConfigNoID(), axiSlaveDmaClockDomain, axiClockDomain, 16, 16, 16, 16, 16)
+      val axi4dma0 = Axi4CC(configBUS.getAxi4ConfigNoID(), axiSlaveDma0ClockDomain, axiClockDomain, 16, 16, 16, 16, 16)
+
+      val axi4dma1 = Axi4CC(configBUS.getAxi4ConfigNoID(), axiSlaveDma1ClockDomain, axiClockDomain, 16, 16, 16, 16, 16)
 
       val clintCtrl = new Axi4Clint(1)
       val plicCtrl  = new Axi4Plic(sourceCount = 32, targetCount = 2)
@@ -369,16 +383,18 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
         axi4acc.io.input    -> (0x70000000L,   256 MB),
         axi4gpio.io.input   -> (0x40000000L,    64 kB),
         axi4uart.io.input   -> (0x40600000L,    64 kB),
-        axi4spi.io.input    -> (0x44A20000L,    64 kB),
         axi4qspi.io.input   -> (0x44A10000L,    64 kB),
+        axi4spi.io.input    -> (0x44A20000L,    64 kB),
+        axi4sd.io.input     -> (0x44A30000L,    64 kB),
         axi4eth.io.input    -> (0x40E00000L,    64 kB),
         axi4mbus.io.input   -> (0x90000000L,     1 GB)
       )
 
       axiCrossbar.addConnections(
-        core.iBus       -> List(ram.io.axi, axi4mbus.io.input),
-        core.dBus       -> List(ram.io.axi, clintCtrl.io.bus, plicCtrl.io.bus, axi4acc.io.input, axi4gpio.io.input, axi4uart.io.input, axi4spi.io.input, axi4qspi.io.input, axi4eth.io.input, axi4mbus.io.input),
-        axi4dma.io.output -> List(axi4mbus.io.input)
+        core.iBus           -> List(ram.io.axi, axi4mbus.io.input),
+        core.dBus           -> List(ram.io.axi, clintCtrl.io.bus, plicCtrl.io.bus, axi4acc.io.input, axi4gpio.io.input, axi4uart.io.input, axi4sd.io.input, axi4spi.io.input, axi4qspi.io.input, axi4eth.io.input, axi4mbus.io.input),
+        axi4dma0.io.output  -> List(axi4mbus.io.input),
+        axi4dma1.io.output  -> List(axi4mbus.io.input)
       )
 
       axiCrossbar.addPipelining(ram.io.axi)((crossbar,ctrl) => {
@@ -404,10 +420,12 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
     AxiLite4SpecRenamer(master(io.m_axi_spi)  .setName("m_axi_spi"))
     AxiLite4SpecRenamer(master(io.m_axi_qspi) .setName("m_axi_qspi"))
     AxiLite4SpecRenamer(master(io.m_axi_eth)  .setName("m_axi_eth"))
+    AxiLite4SpecRenamer(master(io.m_axi_sd)   .setName("m_axi_sd"))
 
     Axi4SpecRenamer(master(io.m_axi_mbus) .setName("m_axi_mbus"))
 
-    Axi4SpecRenamer(slave(io.s_axi_dma) .setName("s_axi_dma"))
+    Axi4SpecRenamer(slave(io.s_axi_dma0) .setName("s_axi_dma0"))
+    Axi4SpecRenamer(slave(io.s_axi_dma1) .setName("s_axi_dma1"))
 
     io.m_axi_acc      <> axi.axi4acc.io.output
     io.m_axi_gpio     <> axi.axi4gpio.io.output
@@ -415,9 +433,11 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
     io.m_axi_spi      <> axi.axi4spi.io.output
     io.m_axi_qspi     <> axi.axi4qspi.io.output
     io.m_axi_eth      <> axi.axi4eth.io.output
+    io.m_axi_sd       <> axi.axi4sd.io.output
 
     io.m_axi_mbus     <> axi.axi4mbus.io.output
-    io.s_axi_dma      <> axi.axi4dma.io.input
+    io.s_axi_dma0     <> axi.axi4dma0.io.input
+    io.s_axi_dma1     <> axi.axi4dma1.io.input
     io.irq            <> axi.plicCtrl.io.sources
 }
 
