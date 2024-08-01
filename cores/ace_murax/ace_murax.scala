@@ -118,19 +118,19 @@ object MuraxConfig{
         cmdForkOnSecondStage = true,
         cmdForkPersistence = withXip, //Required by the Xip controller
         prediction = NONE,
-        catchAccessFault = false,
+        catchAccessFault = true, //**changed to true
         compressedGen = false,
         bigEndian = bigEndian
       ),
       new DBusSimplePlugin(
         catchAddressMisaligned = false,
-        catchAccessFault = false,
+        catchAccessFault = true, //** changed to true
         earlyInjection = false,
         bigEndian = bigEndian
       ),
-      new CsrPlugin(CsrPluginConfig.smallest(mtvecInit = if(withXip) 0xE0040020l else 0x80000020l)),
+      new CsrPlugin(CsrPluginConfig.secure(mtvecInit = if(withXip) 0xE0040020l else 0x80000020l)), //**changed to secure from smallest
       new DecoderSimplePlugin(
-        catchIllegalInstruction = false
+        catchIllegalInstruction = true//**changed to true
       ),
       new RegFilePlugin(
         regFileReadyKind = plugin.SYNC,
