@@ -15,6 +15,8 @@ import vexriscv.ip.{DataCacheConfig, InstructionCacheConfig}
 import vexriscv.plugin._
 import vexriscv.{Riscv, VexRiscv, VexRiscvConfig, plugin}
 
+import vexriscv.ip.fpu.FpuParameter
+
 object Config {
   def spinal = SpinalConfig(
     targetDirectory = "."
@@ -226,8 +228,9 @@ object RuffleBaseConfig{
             catchAddressMisaligned = true
           ),
           ifGen(jtag_select != jtag_type.none)(new DebugPlugin(debugClockDomain)),
+          new FpuPlugin(externalFpu = false,p = FpuParameter(withDouble = false)),
           //new CsrPlugin(CsrPluginConfig.linuxFull(0x80000020l).copy(ebreakGen = false)),
-          new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"ima")).copy(utimeAccess = CsrAccess.READ_ONLY)),
+          new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"imaf")).copy(utimeAccess = CsrAccess.READ_ONLY)),
           new YamlPlugin("ruffle_cpu0.yaml")
         )
       )
@@ -319,7 +322,7 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
     val axi = new ClockingArea(axiClockDomain) {
       val ram = Axi4SharedOnChipRam(
         dataWidth = 32,
-        byteCount = 512 kB,
+        byteCount = 8 kB,
         idWidth = 4
       )
  
@@ -377,7 +380,7 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
       val axiCrossbar = Axi4CrossbarFactory()
 
       axiCrossbar.addSlaves(
-        ram.io.axi          -> (0x80000000L,   512 kB),
+        ram.io.axi          -> (0x80000000L,     8 kB),
         clintCtrl.io.bus    -> (0x02000000L,    48 kB),
         plicCtrl.io.bus     -> (0x0C000000L,     4 MB),
         axi4acc.io.input    -> (0x70000000L,   256 MB),
