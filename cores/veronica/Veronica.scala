@@ -8,6 +8,7 @@ import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba3.apb._
 import spinal.lib.bus.amba4.axi._
+import spinal.lib.bus.amba4.axilite._
 import spinal.lib.com.jtag.Jtag
 import spinal.lib.com.jtag.sim.JtagTcp
 import spinal.lib.com.uart.sim.{UartDecoder, UartEncoder}
@@ -26,6 +27,54 @@ import spinal.lib.system.debugger.{JtagAxi4SharedDebugger, JtagBridge, SystemDeb
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.Seq
 
+object configBUS {
+  def getAxi4Config() = Axi4Config(
+    addressWidth = 32,
+    dataWidth = 32,
+    idWidth = 4,
+    useId = true,
+    useRegion = true,
+    useBurst = true,
+    useLock = false,
+    useQos = false,
+    useLen = true,
+    useResp = false
+  )
+
+  def getAxi4ConfigNoID() = Axi4Config(
+    addressWidth = 32,
+    dataWidth = 32,
+    useId = false,
+    useRegion = false,
+    useBurst = false,
+    useLock = false,
+    useQos = false,
+    useResp = false
+  )
+
+  def getAxiLite4Config() = AxiLite4Config(
+    addressWidth = 32,
+    dataWidth = 32
+  )
+}
+
+//axi lite connection
+case class AxiLite4Output(axiConfig : Axi4Config) extends Component{
+  val io = new Bundle {
+    val input  = slave(Axi4Shared(axiConfig))
+    val output = master(AxiLite4(AxiLite4Config(
+                              addressWidth = axiConfig.addressWidth,
+                              dataWidth = axiConfig.dataWidth,
+                              readIssuingCapability = axiConfig.readIssuingCapability,
+                              writeIssuingCapability = axiConfig.writeIssuingCapability,
+                              combinedIssuingCapability = axiConfig.combinedIssuingCapability,
+                              readDataReorderingDepth = axiConfig.readDataReorderingDepth
+    )))
+  }
+
+  io.output <> AxiLite4Utils.Axi4Rich(io.input.toAxi4()).toLite()
+}
+
 case class Axi4Output(axiConfig : Axi4Config) extends Component{
   val io = new Bundle {
     val input  = slave(Axi4Shared(axiConfig))
@@ -36,26 +85,6 @@ case class Axi4Output(axiConfig : Axi4Config) extends Component{
 }
 
 case class VeronicaConfig(cpuPlugins         : ArrayBuffer[Plugin[VexRiscv]])
-
-object configBUS {
-  def getAxi4Config() = Axi4Config(
-    addressWidth = 32,
-    dataWidth = 32,
-    idWidth = 2,
-    useId = true,
-    useRegion = true,
-    useBurst = true,
-    useLock = false,
-    useQos = false,
-    useLen = true,
-    useResp = false
-  )
-
-  def getAhbConfig() = Apb3Config(
-    addressWidth = 32,
-    dataWidth = 32
-  )
-}
 
 class VeronicaApb3Timer extends Component{
   val io = new Bundle {
@@ -211,7 +240,8 @@ class Veronica(val config: VeronicaConfig) extends Component{
     //Main components IO
     val jtag       = slave(Jtag())
 
-    val m_axi = master(Axi4(configBUS.getAxi4Config()))
+    val m_axi_mbus = master(Axi4(configBUS.getAxi4Config()))
+    val m_axi_acc  = master(AxiLite4(configBUS.getAxiLite4Config()))
 
     //Peripherals IO
     val gpioA         = master(TriStateArray(32 bits))
@@ -271,9 +301,10 @@ class Veronica(val config: VeronicaConfig) extends Component{
       idWidth   = 4
     )
 
-    val axi4output = Axi4Output(configBUS.getAxi4Config())
+    val axi4acc    = AxiLite4Output(configBUS.getAxi4Config())
 
-//     val externalInterrupt = False
+    val axi4mbus = Axi4Output(configBUS.getAxi4Config())
+
     val timerInterrupt = False
 
     val core = new Area{
@@ -292,7 +323,6 @@ class Veronica(val config: VeronicaConfig) extends Component{
           io.irq <> plugin.externalInterruptArray
         }
         case plugin : CsrPlugin        => {
-//           plugin.externalInterrupt := externalInterrupt
           plugin.timerInterrupt := timerInterrupt
         }
         case plugin : DebugPlugin      => debugClockDomain{
@@ -351,14 +381,15 @@ class Veronica(val config: VeronicaConfig) extends Component{
 
     axiCrossbar.addSlaves(
       ram.io.axi          -> (0x80000000L,   8 kB),
-      axi4output.io.input -> (0x90000000L,   1 GB),
+      axi4mbus.io.input   -> (0x90000000L,   1 GB),
+      axi4acc.io.input    -> (0x70000000L,   256 MB),
       apbBridge.io.axi    -> (0xF0000000L,   1 MB)
     )
 
     axiCrossbar.addConnections(
-      core.iBus       -> List(ram.io.axi, axi4output.io.input),
-      core.dBus       -> List(ram.io.axi, axi4output.io.input, apbBridge.io.axi),
-      vgaCtrl.io.axi  -> List(axi4output.io.input)
+      core.iBus       -> List(ram.io.axi, axi4mbus.io.input),
+      core.dBus       -> List(ram.io.axi, axi4mbus.io.input, apbBridge.io.axi, axi4acc.io.input),
+      vgaCtrl.io.axi  -> List(axi4mbus.io.input)
     )
 
 
@@ -369,7 +400,7 @@ class Veronica(val config: VeronicaConfig) extends Component{
       crossbar.readRsp              << bridge.readRsp
     })
 
-    axiCrossbar.addPipelining(axi4output.io.input)((crossbar,ctrl) => {
+    axiCrossbar.addPipelining(axi4mbus.io.input)((crossbar,ctrl) => {
       crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
       crossbar.writeData            >/-> ctrl.writeData
       crossbar.writeRsp              <<  ctrl.writeRsp
@@ -404,20 +435,22 @@ class Veronica(val config: VeronicaConfig) extends Component{
         gpioACtrl.io.apb -> (0x00000, 4 kB),
         gpioBCtrl.io.apb -> (0x01000, 4 kB),
         uartCtrl.io.apb  -> (0x10000, 4 kB),
-        timer.io.apb -> (0x20000, 4 kB),
+        timer.io.apb     -> (0x20000, 4 kB),
         vgaCtrl.io.apb   -> (0x30000, 4 kB)
-
       )
     )
   }
 
-  Axi4SpecRenamer(master(io.m_axi).setName("m_axi"))
+  AxiLite4SpecRenamer(master(io.m_axi_acc)  .setName("m_axi_acc"))
+
+  Axi4SpecRenamer(master(io.m_axi_mbus).setName("m_axi_mbus"))
 
   io.gpioA          <> axi.gpioACtrl.io.gpio
   io.gpioB          <> axi.gpioBCtrl.io.gpio
   io.uart           <> axi.uartCtrl.io.uart
   io.vga            <> axi.vgaCtrl.io.vga
-  io.m_axi          <> axi.axi4output.io.output
+  io.m_axi_mbus     <> axi.axi4mbus.io.output
+  io.m_axi_acc      <> axi.axi4acc.io.output
 }
 
 object Veronica{
