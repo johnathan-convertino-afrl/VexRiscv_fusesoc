@@ -190,7 +190,7 @@ object VeronicaConfig{
           uinstretAccess = CsrAccess.NONE
         )
       ),
-      new YamlPlugin("cpu0.yaml")
+      new YamlPlugin("veronica_cpu0.yaml")
     )
   )
 }
