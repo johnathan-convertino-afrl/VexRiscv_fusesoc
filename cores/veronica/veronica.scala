@@ -166,10 +166,6 @@ object VeronicaConfig{
         //              portTlbSize = 4
         //            )
       ),
-      //                    new DBusSimplePlugin(
-      //                      catchAddressMisaligned = true,
-      //                      catchAccessFault = true
-      //                    ),
       new DBusCachedPlugin(
         config = new DataCacheConfig(
           cacheSize         = 4096,
@@ -221,25 +217,28 @@ object VeronicaConfig{
       new ExternalInterruptArrayPlugin,
       new CsrPlugin(
         config = CsrPluginConfig(
-          catchIllegalAccess = false,
-          mvendorid      = null,
-          marchid        = null,
-          mimpid         = null,
-          mhartid        = null,
-          misaExtensionsInit = 66,
-          misaAccess     = CsrAccess.NONE,
-          mtvecAccess    = CsrAccess.NONE,
-          mtvecInit      = 0x80000020l,
-          mepcAccess     = CsrAccess.READ_WRITE,
-          mscratchGen    = false,
-          mcauseAccess   = CsrAccess.READ_ONLY,
-          mbadaddrAccess = CsrAccess.READ_ONLY,
-          mcycleAccess   = CsrAccess.NONE,
-          minstretAccess = CsrAccess.NONE,
-          ecallGen       = false,
-          wfiGenAsWait         = false,
-          ucycleAccess   = CsrAccess.NONE,
-          uinstretAccess = CsrAccess.NONE
+          catchIllegalAccess = true,
+          mvendorid           = 1,
+          marchid             = 2,
+          mimpid              = 3,
+          mhartid             = 0,
+          misaExtensionsInit  = Riscv.misaToInt(s"ima"),
+          misaAccess          = CsrAccess.READ_WRITE,
+          mtvecAccess         = CsrAccess.READ_WRITE,
+          mtvecInit           = 0x80000020l,
+          mepcAccess          = CsrAccess.READ_WRITE,
+          mscratchGen         = true,
+          mcauseAccess        = CsrAccess.READ_WRITE,
+          mbadaddrAccess      = CsrAccess.READ_WRITE,
+          mcycleAccess        = CsrAccess.READ_WRITE,
+          minstretAccess      = CsrAccess.READ_WRITE,
+          ucycleAccess        = CsrAccess.NONE,
+          uinstretAccess      = CsrAccess.NONE,
+          wfiGenAsWait        = true,
+          ecallGen            = true,
+          userGen             = true,
+          medelegAccess       = CsrAccess.READ_WRITE,
+          midelegAccess       = CsrAccess.READ_WRITE
         )
       ),
       new YamlPlugin("veronica_cpu0.yaml")
