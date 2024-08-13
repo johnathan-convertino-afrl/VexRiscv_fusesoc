@@ -11,21 +11,21 @@ import spinal.lib.bus.amba4.axi._
 import spinal.lib.bus.amba4.axilite._
 import spinal.lib.com.jtag.Jtag
 import spinal.lib.com.jtag.sim.JtagTcp
-import spinal.lib.com.uart.sim.{UartDecoder, UartEncoder}
-import spinal.lib.com.uart.{Apb3UartCtrl, Uart, UartCtrlGenerics, UartCtrlMemoryMappedConfig}
+// import spinal.lib.com.uart.sim.{UartDecoder, UartEncoder}
+import spinal.lib.com.uart._
+import spinal.lib.com.spi._
+import spinal.lib.com.eth._
+import spinal.lib.com.i2c._
 import spinal.lib.graphic.RgbConfig
-import spinal.lib.graphic.vga.{Axi4VgaCtrl, Axi4VgaCtrlGenerics, Vga}
+import spinal.lib.graphic.vga._
 import spinal.lib.io.TriStateArray
-/*import spinal.lib.memory.sdram.SdramGeneration.SDR
-import spinal.lib.memory.sdram._
-import spinal.lib.memory.sdram.sdr.sim.SdramModel
-import spinal.lib.memory.sdram.sdr.{Axi4SharedSdramCtrl, IS42x320D, SdramInterface, SdramTimings}*/
 import spinal.lib.misc.{HexTools, InterruptCtrl, Prescaler, Timer}
-// import spinal.lib.soc.pinsec.{PinsecTimerCtrl, PinsecTimerCtrlExternal}
 import spinal.lib.system.debugger.{JtagAxi4SharedDebugger, JtagBridge, SystemDebugger, SystemDebuggerConfig}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.Seq
+
+case class VeronicaConfig(cpuPlugins         : ArrayBuffer[Plugin[VexRiscv]])
 
 object configBUS {
   def getAxi4Config() = Axi4Config(
@@ -56,6 +56,11 @@ object configBUS {
     addressWidth = 32,
     dataWidth = 32
   )
+
+  def getPhyConfig() = PhyParameter(
+    txDataWidth = 2,
+    rxDataWidth = 2
+  )
 }
 
 //axi lite connection
@@ -84,9 +89,27 @@ case class Axi4Output(axiConfig : Axi4Config) extends Component{
   io.output <> io.input.toAxi4()
 }
 
-case class VeronicaConfig(cpuPlugins         : ArrayBuffer[Plugin[VexRiscv]])
+case class Apb3MacEth(p : MacEthParameter,
+                     txCd : ClockDomain,
+                     rxCd : ClockDomain) extends Component{
+  val io = new Bundle{
+    val apb = slave(Apb3(
+      addressWidth = 8,
+      dataWidth = 32
+    ))
+    val phy = master(PhyIo(p.phy))
+    val interrupt = out Bool ()
+  }
 
-class VeronicaApb3Timer extends Component{
+  val mac = new MacEth(p, txCd, rxCd)
+  io.phy <> mac.io.phy
+
+  val busCtrl = Apb3SlaveFactory(io.apb)
+  val bridge = mac.io.ctrl.driveFrom(busCtrl)
+  io.interrupt := bridge.interruptCtrl.pending
+}
+
+class Apb3Timer extends Component{
   val io = new Bundle {
     val apb = slave(Apb3(
       addressWidth = 8,
@@ -233,9 +256,11 @@ class Veronica(val config: VeronicaConfig) extends Component{
 
   val io = new Bundle{
     //Clocks / reset
-    val asyncReset = in Bool()
-    val axiClk     = in Bool()
-    val vgaClk     = in Bool()
+    val arst    = in Bool()
+    val axi_clk = in Bool()
+    val vga_clk = in Bool()
+    val ddr_clk = in Bool()
+    val eth_clk = in Bool()
 
     //Main components IO
     val jtag       = slave(Jtag())
@@ -247,12 +272,15 @@ class Veronica(val config: VeronicaConfig) extends Component{
     val gpioA         = master(TriStateArray(32 bits))
     val gpioB         = master(TriStateArray(32 bits))
     val uart          = master(Uart())
+    val phy           = master(PhyIo(configBUS.getPhyConfig()))
+    val spi           = master(SpiMaster(ssWidth = 8))
+    val i2c           = master(I2c())
     val vga           = master(Vga(vgaRgbConfig))
-    val irq           = in Bits(32 bits)
+    val irq           = in Bits(28 bits)
   }
 
   val resetCtrlClockDomain = ClockDomain(
-    clock = io.axiClk,
+    clock = io.axi_clk,
     config = ClockDomainConfig(
       resetKind = BOOT
     )
@@ -269,7 +297,7 @@ class Veronica(val config: VeronicaConfig) extends Component{
       systemResetCounter := systemResetCounter + 1
       systemResetUnbuffered := True
     }
-    when(BufferCC(io.asyncReset)){
+    when(BufferCC(io.arst)){
       systemResetCounter := 0
     }
 
@@ -280,18 +308,28 @@ class Veronica(val config: VeronicaConfig) extends Component{
   }
 
   val axiClockDomain = ClockDomain(
-    clock = io.axiClk,
+    clock = io.axi_clk,
     reset = resetCtrl.axiReset
   )
 
   val debugClockDomain = ClockDomain(
-    clock = io.axiClk,
+    clock = io.axi_clk,
     reset = resetCtrl.systemReset
   )
 
   val vgaClockDomain = ClockDomain(
-    clock = io.vgaClk,
+    clock = io.vga_clk,
     reset = resetCtrl.vgaReset
+  )
+
+  val ddrClockDomain = ClockDomain(
+    clock = io.ddr_clk,
+    reset = resetCtrl.axiReset
+  )
+
+  val ethClockDomain = ClockDomain(
+    clock = io.eth_clk,
+    reset = resetCtrl.axiReset
   )
 
   val axi = new ClockingArea(axiClockDomain) {
@@ -301,9 +339,52 @@ class Veronica(val config: VeronicaConfig) extends Component{
       idWidth   = 4
     )
 
-    val axi4acc    = AxiLite4Output(configBUS.getAxi4Config())
+    val uartCtrl = Apb3UartCtrl(UartCtrlMemoryMappedConfig(
+      uartCtrlConfig = UartCtrlGenerics(
+        dataWidthMax      = 8,
+        clockDividerWidth = 20,
+        preSamplingSize   = 1,
+        samplingSize      = 5,
+        postSamplingSize  = 2
+      ),
+      txFifoDepth = 16,
+      rxFifoDepth = 16
+    ))
 
-    val axi4mbus = Axi4Output(configBUS.getAxi4Config())
+    val spiCtrl = Apb3SpiMasterCtrl(SpiMasterCtrlMemoryMappedConfig(
+      ctrlGenerics = SpiMasterCtrlGenerics(
+        ssWidth = 8,
+        timerWidth = 32,
+        dataWidth = 8
+      )
+    ))
+
+    val ethCtrl = new Apb3MacEth(MacEthParameter(
+      phy = configBUS.getPhyConfig(),
+      rxDataWidth = 32,
+      rxBufferByteSize = 4096,
+      txDataWidth = 32,
+      txBufferByteSize = 4096
+      ),
+      ethClockDomain,
+      ethClockDomain
+    )
+
+    val i2cCtrl = new Apb3I2cCtrl(I2cSlaveMemoryMappedGenerics(
+      ctrlGenerics = I2cSlaveGenerics(
+        samplingWindowSize = 3,
+        samplingClockDividerWidth = 10 bits,
+        timeoutWidth = 20 bits
+      ),
+      addressFilterCount = 4,
+      masterGenerics = I2cMasterMemoryMappedGenerics(
+        timerWidth = 12
+      )
+    ))
+
+    val axi4acc   = AxiLite4Output(configBUS.getAxi4Config())
+
+    val axi4mbus  = Axi4CC(configBUS.getAxi4Config(), axiClockDomain, ddrClockDomain, 16, 16, 16, 16, 16)
 
     val timerInterrupt = False
 
@@ -320,7 +401,11 @@ class Veronica(val config: VeronicaConfig) extends Component{
         case plugin : IBusCachedPlugin => iBus = plugin.iBus.toAxi4ReadOnly()
         case plugin : DBusCachedPlugin => dBus = plugin.dBus.toAxi4Shared(true)
         case plugin : ExternalInterruptArrayPlugin => {
-          io.irq <> plugin.externalInterruptArray
+          io.irq <> plugin.externalInterruptArray(27 downto 0)
+          plugin.externalInterruptArray(28) := i2cCtrl.io.interrupt
+          plugin.externalInterruptArray(29) := ethCtrl.io.interrupt
+          plugin.externalInterruptArray(30) := spiCtrl.io.interrupt
+          plugin.externalInterruptArray(31) := uartCtrl.io.interrupt
         }
         case plugin : CsrPlugin        => {
           plugin.timerInterrupt := timerInterrupt
@@ -339,7 +424,7 @@ class Veronica(val config: VeronicaConfig) extends Component{
       idWidth      = 4
     )
 
-    val timer = new VeronicaApb3Timer()
+    val timer = new Apb3Timer()
     timerInterrupt setWhen(timer.io.interrupt)
 
     val gpioACtrl = Apb3Gpio(
@@ -350,20 +435,6 @@ class Veronica(val config: VeronicaConfig) extends Component{
       gpioWidth = 32,
       withReadSync = true
     )
-
-    val uartCtrl = Apb3UartCtrl(UartCtrlMemoryMappedConfig(
-      uartCtrlConfig = UartCtrlGenerics(
-        dataWidthMax      = 8,
-        clockDividerWidth = 20,
-        preSamplingSize   = 1,
-        samplingSize      = 5,
-        postSamplingSize  = 2
-      ),
-      txFifoDepth = 16,
-      rxFifoDepth = 16
-    ))
-//     externalInterrupt setWhen(uartCtrl.io.interrupt)
-
 
     val vgaCtrlConfig = Axi4VgaCtrlGenerics(
       axiAddressWidth = 32,
@@ -400,13 +471,6 @@ class Veronica(val config: VeronicaConfig) extends Component{
       crossbar.readRsp              << bridge.readRsp
     })
 
-    axiCrossbar.addPipelining(axi4mbus.io.input)((crossbar,ctrl) => {
-      crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
-      crossbar.writeData            >/-> ctrl.writeData
-      crossbar.writeRsp              <<  ctrl.writeRsp
-      crossbar.readRsp               <<  ctrl.readRsp
-    })
-
     axiCrossbar.addPipelining(ram.io.axi)((crossbar,ctrl) => {
       crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
       crossbar.writeData            >/-> ctrl.writeData
@@ -436,7 +500,10 @@ class Veronica(val config: VeronicaConfig) extends Component{
         gpioBCtrl.io.apb -> (0x01000, 4 kB),
         uartCtrl.io.apb  -> (0x10000, 4 kB),
         timer.io.apb     -> (0x20000, 4 kB),
-        vgaCtrl.io.apb   -> (0x30000, 4 kB)
+        vgaCtrl.io.apb   -> (0x30000, 4 kB),
+        spiCtrl.io.apb   -> (0x40000, 4 kB),
+        ethCtrl.io.apb   -> (0x50000, 4 kB),
+        i2cCtrl.io.apb   -> (0x60000, 4 kB)
       )
     )
   }
@@ -448,9 +515,12 @@ class Veronica(val config: VeronicaConfig) extends Component{
   io.gpioA          <> axi.gpioACtrl.io.gpio
   io.gpioB          <> axi.gpioBCtrl.io.gpio
   io.uart           <> axi.uartCtrl.io.uart
+  io.spi            <> axi.spiCtrl.io.spi
   io.vga            <> axi.vgaCtrl.io.vga
   io.m_axi_mbus     <> axi.axi4mbus.io.output
   io.m_axi_acc      <> axi.axi4acc.io.output
+  io.phy            <> axi.ethCtrl.io.phy
+  io.i2c            <> axi.i2cCtrl.io.i2c
 }
 
 object Veronica{
