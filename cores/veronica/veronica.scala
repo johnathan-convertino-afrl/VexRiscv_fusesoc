@@ -262,11 +262,16 @@ class Veronica(val config: VeronicaConfig) extends Component{
     val ddr_clk = in Bool()
     val eth_clk = in Bool()
 
+    val s_axi_dma0_aclk   = in Bool()
+    val s_axi_dma0_arstn  = in Bool()
+
     //Main components IO
     val jtag       = slave(Jtag())
 
+    //external axi interfaces
     val m_axi_mbus = master(Axi4(configBUS.getAxi4Config()))
     val m_axi_acc  = master(AxiLite4(configBUS.getAxiLite4Config()))
+    val s_axi_dma0 = slave(Axi4(configBUS.getAxi4ConfigNoID()))
 
     //Peripherals IO
     val gpioA         = master(TriStateArray(32 bits))
@@ -332,6 +337,12 @@ class Veronica(val config: VeronicaConfig) extends Component{
     reset = resetCtrl.axiReset
   )
 
+  val axiSlaveDma0ClockDomain = ClockDomain(
+    clock = io.s_axi_dma0_aclk,
+    reset = io.s_axi_dma0_arstn
+  )
+
+
   val axi = new ClockingArea(axiClockDomain) {
     val ram = Axi4SharedOnChipRam(
       dataWidth = 32,
@@ -381,6 +392,8 @@ class Veronica(val config: VeronicaConfig) extends Component{
         timerWidth = 12
       )
     ))
+
+    val axi4dma0 = Axi4CC(configBUS.getAxi4ConfigNoID(), axiSlaveDma0ClockDomain, axiClockDomain, 16, 16, 16, 16, 16)
 
     val axi4acc   = AxiLite4Output(configBUS.getAxi4Config())
 
@@ -447,7 +460,6 @@ class Veronica(val config: VeronicaConfig) extends Component{
     )
     val vgaCtrl = Axi4VgaCtrl(vgaCtrlConfig)
 
-
     val axiCrossbar = Axi4CrossbarFactory()
 
     axiCrossbar.addSlaves(
@@ -458,9 +470,10 @@ class Veronica(val config: VeronicaConfig) extends Component{
     )
 
     axiCrossbar.addConnections(
-      core.iBus       -> List(ram.io.axi, axi4mbus.io.input),
-      core.dBus       -> List(ram.io.axi, axi4mbus.io.input, apbBridge.io.axi, axi4acc.io.input),
-      vgaCtrl.io.axi  -> List(axi4mbus.io.input)
+      core.iBus           -> List(ram.io.axi, axi4mbus.io.input),
+      core.dBus           -> List(ram.io.axi, axi4mbus.io.input, apbBridge.io.axi, axi4acc.io.input),
+      vgaCtrl.io.axi      -> List(axi4mbus.io.input),
+      axi4dma0.io.output  -> List(axi4mbus.io.input)
     )
 
 
@@ -511,6 +524,7 @@ class Veronica(val config: VeronicaConfig) extends Component{
   AxiLite4SpecRenamer(master(io.m_axi_acc)  .setName("m_axi_acc"))
 
   Axi4SpecRenamer(master(io.m_axi_mbus).setName("m_axi_mbus"))
+  Axi4SpecRenamer(slave(io.s_axi_dma0) .setName("s_axi_dma0"))
 
   io.gpioA          <> axi.gpioACtrl.io.gpio
   io.gpioB          <> axi.gpioBCtrl.io.gpio
@@ -521,6 +535,7 @@ class Veronica(val config: VeronicaConfig) extends Component{
   io.m_axi_acc      <> axi.axi4acc.io.output
   io.phy            <> axi.ethCtrl.io.phy
   io.i2c            <> axi.i2cCtrl.io.i2c
+  io.s_axi_dma0     <> axi.axi4dma0.io.input
 }
 
 object Veronica{
