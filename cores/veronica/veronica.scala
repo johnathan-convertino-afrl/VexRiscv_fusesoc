@@ -176,8 +176,13 @@ object VeronicaConfig{
         earlyBranch = false,
         catchAddressMisaligned = true
       ),
-      new PmpPlugin(
+//       new PmpPlugin(
+//         regions = 16,
+//         ioRange = _(31 downto 28) === 0xf
+//       ),
+      new PmpPluginNapot(
         regions = 16,
+        granularity = 8,
         ioRange = _(31 downto 28) === 0xf
       ),
       new ExternalInterruptArrayPlugin,
