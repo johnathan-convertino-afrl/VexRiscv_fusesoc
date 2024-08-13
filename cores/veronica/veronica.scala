@@ -144,13 +144,12 @@ class Apb3Timer extends Component{
 object VeronicaConfig{
   def default() =  VeronicaConfig(
     cpuPlugins = ArrayBuffer(
-      new PcManagerSimplePlugin(0x80000000l, false),
       new IBusCachedPlugin(
         resetVector = 0x80000000l,
         prediction = STATIC,
         config = InstructionCacheConfig(
           cacheSize = 4096,
-          bytePerLine =32,
+          bytePerLine = 32,
           wayCount = 1,
           addressWidth = 32,
           cpuDataWidth = 32,
@@ -161,10 +160,6 @@ object VeronicaConfig{
           twoCycleRam = true,
           twoCycleCache = true
         )
-        //            askMemoryTranslation = true,
-        //            memoryTranslatorPortConfig = MemoryTranslatorPortConfig(
-        //              portTlbSize = 4
-        //            )
       ),
       new DBusCachedPlugin(
         config = new DataCacheConfig(
@@ -177,14 +172,7 @@ object VeronicaConfig{
           catchAccessError  = true,
           catchIllegal      = true,
           catchUnaligned    = true
-        ),
-        memoryTranslatorPortConfig = null
-        //            memoryTranslatorPortConfig = MemoryTranslatorPortConfig(
-        //              portTlbSize = 6
-        //            )
-      ),
-      new StaticMemoryTranslatorPlugin(
-        ioRange      = _(31 downto 28) === 0xF
+        )
       ),
       new DecoderSimplePlugin(
         catchIllegalInstruction = true
@@ -213,6 +201,10 @@ object VeronicaConfig{
       new BranchPlugin(
         earlyBranch = false,
         catchAddressMisaligned = true
+      ),
+      new PmpPlugin(
+        regions = 16,
+        ioRange = _(31 downto 28) === 0xf
       ),
       new ExternalInterruptArrayPlugin,
       new CsrPlugin(
