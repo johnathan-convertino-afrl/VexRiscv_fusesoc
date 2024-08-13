@@ -14,7 +14,6 @@ import spinal.lib.com.jtag.sim.JtagTcp
 // import spinal.lib.com.uart.sim.{UartDecoder, UartEncoder}
 import spinal.lib.com.uart._
 import spinal.lib.com.spi._
-import spinal.lib.com.eth._
 import spinal.lib.com.i2c._
 import spinal.lib.graphic.RgbConfig
 import spinal.lib.graphic.vga._
@@ -56,11 +55,6 @@ object configBUS {
     addressWidth = 32,
     dataWidth = 32
   )
-
-  def getPhyConfig() = PhyParameter(
-    txDataWidth = 2,
-    rxDataWidth = 2
-  )
 }
 
 //axi lite connection
@@ -87,26 +81,6 @@ case class Axi4Output(axiConfig : Axi4Config) extends Component{
   }
 
   io.output <> io.input.toAxi4()
-}
-
-case class Apb3MacEth(p : MacEthParameter,
-                     txCd : ClockDomain,
-                     rxCd : ClockDomain) extends Component{
-  val io = new Bundle{
-    val apb = slave(Apb3(
-      addressWidth = 8,
-      dataWidth = 32
-    ))
-    val phy = master(PhyIo(p.phy))
-    val interrupt = out Bool ()
-  }
-
-  val mac = new MacEth(p, txCd, rxCd)
-  io.phy <> mac.io.phy
-
-  val busCtrl = Apb3SlaveFactory(io.apb)
-  val bridge = mac.io.ctrl.driveFrom(busCtrl)
-  io.interrupt := bridge.interruptCtrl.pending
 }
 
 class Apb3Timer extends Component{
@@ -251,7 +225,6 @@ class Veronica(val config: VeronicaConfig) extends Component{
     val axi_clk = in Bool()
     val vga_clk = in Bool()
     val ddr_clk = in Bool()
-    val eth_clk = in Bool()
 
     val s_axi_dma0_aclk   = in Bool()
     val s_axi_dma0_arstn  = in Bool()
@@ -268,11 +241,10 @@ class Veronica(val config: VeronicaConfig) extends Component{
     val gpioA         = master(TriStateArray(32 bits))
     val gpioB         = master(TriStateArray(32 bits))
     val uart          = master(Uart())
-    val phy           = master(PhyIo(configBUS.getPhyConfig()))
     val spi           = master(SpiMaster(ssWidth = 8))
     val i2c           = master(I2c())
     val vga           = master(Vga(vgaRgbConfig))
-    val irq           = in Bits(28 bits)
+    val irq           = in Bits(29 bits)
   }
 
   val resetCtrlClockDomain = ClockDomain(
@@ -323,11 +295,6 @@ class Veronica(val config: VeronicaConfig) extends Component{
     reset = resetCtrl.axiReset
   )
 
-  val ethClockDomain = ClockDomain(
-    clock = io.eth_clk,
-    reset = resetCtrl.axiReset
-  )
-
   val axiSlaveDma0ClockDomain = ClockDomain(
     clock = io.s_axi_dma0_aclk,
     reset = io.s_axi_dma0_arstn
@@ -360,17 +327,6 @@ class Veronica(val config: VeronicaConfig) extends Component{
         dataWidth = 8
       )
     ))
-
-    val ethCtrl = new Apb3MacEth(MacEthParameter(
-      phy = configBUS.getPhyConfig(),
-      rxDataWidth = 32,
-      rxBufferByteSize = 4096,
-      txDataWidth = 32,
-      txBufferByteSize = 4096
-      ),
-      ethClockDomain,
-      ethClockDomain
-    )
 
     val i2cCtrl = new Apb3I2cCtrl(I2cSlaveMemoryMappedGenerics(
       ctrlGenerics = I2cSlaveGenerics(
@@ -405,9 +361,8 @@ class Veronica(val config: VeronicaConfig) extends Component{
         case plugin : IBusCachedPlugin => iBus = plugin.iBus.toAxi4ReadOnly()
         case plugin : DBusCachedPlugin => dBus = plugin.dBus.toAxi4Shared(true)
         case plugin : ExternalInterruptArrayPlugin => {
-          io.irq <> plugin.externalInterruptArray(27 downto 0)
-          plugin.externalInterruptArray(28) := i2cCtrl.io.interrupt
-          plugin.externalInterruptArray(29) := ethCtrl.io.interrupt
+          io.irq <> plugin.externalInterruptArray(28 downto 0)
+          plugin.externalInterruptArray(29) := i2cCtrl.io.interrupt
           plugin.externalInterruptArray(30) := spiCtrl.io.interrupt
           plugin.externalInterruptArray(31) := uartCtrl.io.interrupt
         }
@@ -506,8 +461,7 @@ class Veronica(val config: VeronicaConfig) extends Component{
         timer.io.apb     -> (0x20000, 4 kB),
         vgaCtrl.io.apb   -> (0x30000, 4 kB),
         spiCtrl.io.apb   -> (0x40000, 4 kB),
-        ethCtrl.io.apb   -> (0x50000, 4 kB),
-        i2cCtrl.io.apb   -> (0x60000, 4 kB)
+        i2cCtrl.io.apb   -> (0x50000, 4 kB)
       )
     )
   }
@@ -524,7 +478,6 @@ class Veronica(val config: VeronicaConfig) extends Component{
   io.vga            <> axi.vgaCtrl.io.vga
   io.m_axi_mbus     <> axi.axi4mbus.io.output
   io.m_axi_acc      <> axi.axi4acc.io.output
-  io.phy            <> axi.ethCtrl.io.phy
   io.i2c            <> axi.i2cCtrl.io.i2c
   io.s_axi_dma0     <> axi.axi4dma0.io.input
 }
