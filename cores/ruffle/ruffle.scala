@@ -146,7 +146,6 @@ object RuffleBaseConfig{
       //CPU configuration
       VexRiscvConfig(
         plugins = List(
-          new PcManagerSimplePlugin(0x80000000l, false),
           new IBusCachedPlugin(
             resetVector = 0x80000000l,
             prediction = STATIC,
