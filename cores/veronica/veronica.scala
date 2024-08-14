@@ -276,22 +276,26 @@ class Veronica(val config: VeronicaConfig) extends Component{
 
   val axiClockDomain = ClockDomain(
     clock = io.axi_clk,
-    reset = resetCtrl.axiReset
+    reset = resetCtrl.axiReset,
+    frequency = FixedFrequency(100 MHz)
   )
 
   val debugClockDomain = ClockDomain(
     clock = io.axi_clk,
-    reset = resetCtrl.systemReset
+    reset = resetCtrl.systemReset,
+    frequency = FixedFrequency(100 MHz)
   )
 
   val vgaClockDomain = ClockDomain(
     clock = io.vga_clk,
-    reset = resetCtrl.vgaReset
+    reset = resetCtrl.vgaReset,
+    frequency = FixedFrequency(25 MHz)
   )
 
   val ddrClockDomain = ClockDomain(
     clock = io.ddr_clk,
-    reset = resetCtrl.axiReset
+    reset = resetCtrl.axiReset,
+    frequency = FixedFrequency(200 MHz)
   )
 
   val axiSlaveDma0ClockDomain = ClockDomain(
@@ -312,9 +316,17 @@ class Veronica(val config: VeronicaConfig) extends Component{
         dataWidthMax      = 8,
         clockDividerWidth = 20,
         preSamplingSize   = 1,
-        samplingSize      = 5,
-        postSamplingSize  = 2
+        samplingSize      = 3,
+        postSamplingSize  = 1
       ),
+      initConfig = UartCtrlInitConfig(
+        baudrate = 115200,
+        dataLength = 7,  //7 => 8 bits
+        parity = UartParityType.NONE,
+        stop = UartStopType.ONE
+      ),
+      busCanWriteClockDividerConfig = false,
+      busCanWriteFrameConfig = false,
       txFifoDepth = 16,
       rxFifoDepth = 16
     ))
@@ -339,7 +351,7 @@ class Veronica(val config: VeronicaConfig) extends Component{
       )
     ))
 
-    val axi4dma0 = Axi4CC(configBUS.getAxi4ConfigNoID(), axiSlaveDma0ClockDomain, axiClockDomain, 16, 16, 16, 16, 16)
+    val axi4dma0  = Axi4CC(configBUS.getAxi4ConfigNoID(), axiSlaveDma0ClockDomain, axiClockDomain, 16, 16, 16, 16, 16)
 
     val axi4acc   = AxiLite4Output(configBUS.getAxi4Config())
 
