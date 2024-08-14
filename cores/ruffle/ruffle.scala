@@ -259,12 +259,7 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
       val s_axi_dma1 = slave(Axi4(configBUS.getAxi4ConfigNoID()))
 
       val m_axi_acc  = master(AxiLite4(configBUS.getAxiLite4Config()))
-      val m_axi_gpio = master(AxiLite4(configBUS.getAxiLite4Config()))
-      val m_axi_uart = master(AxiLite4(configBUS.getAxiLite4Config()))
-      val m_axi_spi  = master(AxiLite4(configBUS.getAxiLite4Config()))
-      val m_axi_qspi = master(AxiLite4(configBUS.getAxiLite4Config()))
-      val m_axi_eth  = master(AxiLite4(configBUS.getAxiLite4Config()))
-      val m_axi_sd   = master(AxiLite4(configBUS.getAxiLite4Config()))
+      val m_axi_perf = master(AxiLite4(configBUS.getAxiLite4Config()))
     }
 
     val resetCtrlClockDomain = ClockDomain(
@@ -326,12 +321,7 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
       )
  
       val axi4acc  = AxiLite4Output(configBUS.getAxi4Config())
-      val axi4gpio = AxiLite4Output(configBUS.getAxi4Config())
-      val axi4uart = AxiLite4Output(configBUS.getAxi4Config())
-      val axi4spi  = AxiLite4Output(configBUS.getAxi4Config())
-      val axi4qspi = AxiLite4Output(configBUS.getAxi4Config())
-      val axi4eth  = AxiLite4Output(configBUS.getAxi4Config())
-      val axi4sd   = AxiLite4Output(configBUS.getAxi4Config())
+      val axi4perf = AxiLite4Output(configBUS.getAxi4Config())
 
       val axi4mbus = Axi4CC(configBUS.getAxi4Config(), axiClockDomain, ddrClockDomain, 16, 16, 16, 16, 16)
 
@@ -383,18 +373,13 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
         clintCtrl.io.bus    -> (0x02000000L,    48 kB),
         plicCtrl.io.bus     -> (0x0C000000L,     4 MB),
         axi4acc.io.input    -> (0x70000000L,   256 MB),
-        axi4gpio.io.input   -> (0x40000000L,    64 kB),
-        axi4uart.io.input   -> (0x40600000L,    64 kB),
-        axi4qspi.io.input   -> (0x44A10000L,    64 kB),
-        axi4spi.io.input    -> (0x44A20000L,    64 kB),
-        axi4sd.io.input     -> (0x44A30000L,    64 kB),
-        axi4eth.io.input    -> (0x40E00000L,    64 kB),
+        axi4perf.io.input   -> (0x40000000L,   256 MB),
         axi4mbus.io.input   -> (0x90000000L,     1 GB)
       )
 
       axiCrossbar.addConnections(
         core.iBus           -> List(ram.io.axi, axi4mbus.io.input),
-        core.dBus           -> List(ram.io.axi, clintCtrl.io.bus, plicCtrl.io.bus, axi4acc.io.input, axi4gpio.io.input, axi4uart.io.input, axi4sd.io.input, axi4spi.io.input, axi4qspi.io.input, axi4eth.io.input, axi4mbus.io.input),
+        core.dBus           -> List(ram.io.axi, clintCtrl.io.bus, plicCtrl.io.bus, axi4acc.io.input, axi4perf.io.input, axi4mbus.io.input),
         axi4dma0.io.output  -> List(axi4mbus.io.input),
         axi4dma1.io.output  -> List(axi4mbus.io.input)
       )
@@ -417,12 +402,7 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
     }
 
     AxiLite4SpecRenamer(master(io.m_axi_acc)  .setName("m_axi_acc"))
-    AxiLite4SpecRenamer(master(io.m_axi_gpio) .setName("m_axi_gpio"))
-    AxiLite4SpecRenamer(master(io.m_axi_uart) .setName("m_axi_uart"))
-    AxiLite4SpecRenamer(master(io.m_axi_spi)  .setName("m_axi_spi"))
-    AxiLite4SpecRenamer(master(io.m_axi_qspi) .setName("m_axi_qspi"))
-    AxiLite4SpecRenamer(master(io.m_axi_eth)  .setName("m_axi_eth"))
-    AxiLite4SpecRenamer(master(io.m_axi_sd)   .setName("m_axi_sd"))
+    AxiLite4SpecRenamer(master(io.m_axi_perf) .setName("m_axi_perf"))
 
     Axi4SpecRenamer(master(io.m_axi_mbus) .setName("m_axi_mbus"))
 
@@ -430,12 +410,7 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
     Axi4SpecRenamer(slave(io.s_axi_dma1) .setName("s_axi_dma1"))
 
     io.m_axi_acc      <> axi.axi4acc.io.output
-    io.m_axi_gpio     <> axi.axi4gpio.io.output
-    io.m_axi_uart     <> axi.axi4uart.io.output
-    io.m_axi_spi      <> axi.axi4spi.io.output
-    io.m_axi_qspi     <> axi.axi4qspi.io.output
-    io.m_axi_eth      <> axi.axi4eth.io.output
-    io.m_axi_sd       <> axi.axi4sd.io.output
+    io.m_axi_perf     <> axi.axi4perf.io.output
 
     io.m_axi_mbus     <> axi.axi4mbus.io.output
     io.s_axi_dma0     <> axi.axi4dma0.io.input
