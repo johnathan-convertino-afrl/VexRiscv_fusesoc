@@ -9,9 +9,7 @@ import spinal.lib._
 import spinal.lib.bus.amba3.apb._
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.bus.amba4.axilite._
-import spinal.lib.com.jtag.Jtag
-import spinal.lib.com.jtag.sim.JtagTcp
-// import spinal.lib.com.uart.sim.{UartDecoder, UartEncoder}
+import spinal.lib.com.jtag.{Jtag, JtagTapInstructionCtrl}
 import spinal.lib.com.uart._
 import spinal.lib.com.spi._
 import spinal.lib.com.i2c._
@@ -176,10 +174,6 @@ object VeronicaConfig{
         earlyBranch = false,
         catchAddressMisaligned = true
       ),
-//       new PmpPlugin(
-//         regions = 16,
-//         ioRange = _(31 downto 28) === 0xf
-//       ),
       new PmpPluginNapot(
         regions = 16,
         granularity = 8,
@@ -235,7 +229,7 @@ class Veronica(val config: VeronicaConfig) extends Component{
     val s_axi_dma0_arstn  = in Bool()
 
     //Main components IO
-    val jtag       = slave(Jtag())
+//     val jtag       = slave(Jtag())
 
     //external axi interfaces
     val m_axi_mbus = master(Axi4(configBUS.getAxi4Config()))
@@ -375,8 +369,11 @@ class Veronica(val config: VeronicaConfig) extends Component{
           plugin.timerInterrupt := timerInterrupt
         }
         case plugin : DebugPlugin      => debugClockDomain{
-          resetCtrl.axiReset setWhen(RegNext(plugin.io.resetOut))
-          io.jtag <> plugin.io.bus.fromJtag()
+//           resetCtrl.axiReset setWhen(RegNext(plugin.io.resetOut))
+//           io.jtag <> plugin.io.bus.fromJtag()
+            val jtagCtrl = JtagTapInstructionCtrl()
+            val tap = jtagCtrl.fromXilinxBscane2(userId = 2)
+            jtagCtrl <> plugin.io.bus.fromJtagInstructionCtrl(ClockDomain(tap.TCK), 0)
         }
         case _ =>
       }
