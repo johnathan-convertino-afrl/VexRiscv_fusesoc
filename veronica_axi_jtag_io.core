@@ -1,10 +1,10 @@
 CAPI=2:
-name : spinalhdl:cpu:ruffle_axi:1.0.0
+name : spinalhdl:cpu:veronica_axi_jtag_io:1.0.0
 
 filesets:
   rtl:
     files:
-      - cores/ruffle/Ruffle.v
+      - cores/ruffle/Veronica.v
     file_type : verilogSource
 
   dep:
@@ -18,7 +18,7 @@ generate:
     generator: spinalhdl
     parameters:
       src_dir: cores/ruffle
-      build_args: ["runMain", "vexriscv.afrl.Ruffle_Axi"]
+      build_args: ["runMain", "vexriscv.afrl.Veronica_Axi_JTAG_IO"]
 
 targets:
   default:
