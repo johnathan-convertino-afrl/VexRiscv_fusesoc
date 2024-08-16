@@ -1,28 +1,27 @@
 package vexriscv.afrl
 
-
-import vexriscv.plugin._
-import vexriscv._
-import vexriscv.ip.{DataCacheConfig, InstructionCacheConfig}
 import spinal.core._
 import spinal.lib._
-import spinal.lib.bus.amba3.apb._
+import spinal.lib.misc.Clint
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.bus.amba4.axilite._
+import spinal.lib.misc.plic._
 import spinal.lib.com.jtag.{Jtag, JtagTapInstructionCtrl}
-import spinal.lib.com.uart._
-import spinal.lib.com.spi._
-import spinal.lib.com.i2c._
-import spinal.lib.graphic.RgbConfig
-import spinal.lib.graphic.vga._
+import spinal.lib.eda.altera.{InterruptReceiverTag, ResetEmitterTag}
+import spinal.lib.bus.wishbone._
 import spinal.lib.io.TriStateArray
-import spinal.lib.misc.{HexTools, InterruptCtrl, Prescaler, Timer}
-import spinal.lib.system.debugger.{JtagAxi4SharedDebugger, JtagBridge, SystemDebugger, SystemDebuggerConfig}
+import spinal.lib.cpu.riscv.RiscvHart
+import vexriscv.ip.{DataCacheConfig, InstructionCacheConfig}
+import vexriscv.plugin._
+import vexriscv.{Riscv, VexRiscv, VexRiscvConfig, plugin}
 
-import scala.collection.mutable.ArrayBuffer
-import scala.collection.Seq
+import vexriscv.ip.fpu.FpuParameter
 
-case class VeronicaConfig(cpuPlugins         : ArrayBuffer[Plugin[VexRiscv]])
+object Config {
+  def spinal = SpinalConfig(
+    targetDirectory = "."
+  )
+}
 
 object configBUS {
   def getAxi4Config() = Axi4Config(
@@ -48,7 +47,7 @@ object configBUS {
     useQos = false,
     useResp = false
   )
-
+    
   def getAxiLite4Config() = AxiLite4Config(
     addressWidth = 32,
     dataWidth = 32
@@ -72,6 +71,7 @@ case class AxiLite4Output(axiConfig : Axi4Config) extends Component{
   io.output <> AxiLite4Utils.Axi4Rich(io.input.toAxi4()).toLite()
 }
 
+//axi connection
 case class Axi4Output(axiConfig : Axi4Config) extends Component{
   val io = new Bundle {
     val input  = slave(Axi4Shared(axiConfig))
@@ -81,427 +81,305 @@ case class Axi4Output(axiConfig : Axi4Config) extends Component{
   io.output <> io.input.toAxi4()
 }
 
-class Apb3Timer extends Component{
-  val io = new Bundle {
-    val apb = slave(Apb3(
-      addressWidth = 8,
-      dataWidth = 32
-    ))
-    val interrupt = out Bool()
-  }
-
-  val prescaler = Prescaler(16)
-  val timerA,timerB = Timer(16)
-
-  val busCtrl = Apb3SlaveFactory(io.apb)
-  val prescalerBridge = prescaler.driveFrom(busCtrl,0x00)
-
-  val timerABridge = timerA.driveFrom(busCtrl,0x40)(
-    ticks  = List(True, prescaler.io.overflow),
-    clears = List(timerA.io.full)
-  )
-
-  val timerBBridge = timerB.driveFrom(busCtrl,0x50)(
-    ticks  = List(True, prescaler.io.overflow),
-    clears = List(timerB.io.full)
-  )
-
-  val interruptCtrl = InterruptCtrl(2)
-  val interruptCtrlBridge = interruptCtrl.driveFrom(busCtrl,0x10)
-  interruptCtrl.io.inputs(0) := timerA.io.full
-  interruptCtrl.io.inputs(1) := timerB.io.full
-  io.interrupt := interruptCtrl.io.pendings.orR
+sealed trait jtag_type
+object jtag_type {
+  case object io extends jtag_type
+  case object xilinx_bscane extends jtag_type
+  case object none extends jtag_type
 }
 
-object VeronicaConfig{
-  def default() =  VeronicaConfig(
-    cpuPlugins = ArrayBuffer(
-      new IBusCachedPlugin(
-        resetVector = 0x80000000l,
-        prediction = STATIC,
-        config = InstructionCacheConfig(
-          cacheSize = 4096,
-          bytePerLine = 32,
-          wayCount = 1,
-          addressWidth = 32,
-          cpuDataWidth = 32,
-          memDataWidth = 32,
-          catchIllegalAccess = true,
-          catchAccessFault = true,
-          asyncTagMemory = false,
-          twoCycleRam = true,
-          twoCycleCache = true
-        )
-      ),
-      new DBusCachedPlugin(
-        config = new DataCacheConfig(
-          cacheSize         = 4096,
-          bytePerLine       = 32,
-          wayCount          = 1,
-          addressWidth      = 32,
-          cpuDataWidth      = 32,
-          memDataWidth      = 32,
-          catchAccessError  = true,
-          catchIllegal      = true,
-          catchUnaligned    = true
-        )
-      ),
-      new DecoderSimplePlugin(
-        catchIllegalInstruction = true
-      ),
-      new RegFilePlugin(
-        regFileReadyKind = plugin.SYNC,
-        zeroBoot = false
-      ),
-      new IntAluPlugin,
-      new SrcPlugin(
-        separatedAddSub = false,
-        executeInsertion = true
-      ),
-      new FullBarrelShifterPlugin,
-      new MulPlugin,
-      new DivPlugin,
-      new HazardSimplePlugin(
-        bypassExecute           = true,
-        bypassMemory            = true,
-        bypassWriteBack         = true,
-        bypassWriteBackBuffer   = true,
-        pessimisticUseSrc       = false,
-        pessimisticWriteRegFile = false,
-        pessimisticAddressMatch = false
-      ),
-      new BranchPlugin(
-        earlyBranch = false,
-        catchAddressMisaligned = true
-      ),
-      new PmpPluginNapot(
-        regions = 16,
-        granularity = 8,
-        ioRange = _(31 downto 28) === 0xf
-      ),
-      new ExternalInterruptArrayPlugin,
-      new CsrPlugin(
-        config = CsrPluginConfig(
-          catchIllegalAccess = true,
-          mvendorid           = 1,
-          marchid             = 2,
-          mimpid              = 3,
-          mhartid             = 0,
-          misaExtensionsInit  = Riscv.misaToInt(s"ima"),
-          misaAccess          = CsrAccess.READ_WRITE,
-          mtvecAccess         = CsrAccess.READ_WRITE,
-          mtvecInit           = 0x80000020l,
-          mepcAccess          = CsrAccess.READ_WRITE,
-          mscratchGen         = true,
-          mcauseAccess        = CsrAccess.READ_WRITE,
-          mbadaddrAccess      = CsrAccess.READ_WRITE,
-          mcycleAccess        = CsrAccess.READ_WRITE,
-          minstretAccess      = CsrAccess.READ_WRITE,
-          ucycleAccess        = CsrAccess.NONE,
-          uinstretAccess      = CsrAccess.NONE,
-          wfiGenAsWait        = true,
-          ecallGen            = true,
-          userGen             = true,
-          medelegAccess       = CsrAccess.READ_WRITE,
-          midelegAccess       = CsrAccess.READ_WRITE
-        )
-      ),
-      new YamlPlugin("veronica_cpu0.yaml")
+object VeronicaBaseConfig{
+  def gen(debugClockDomain : ClockDomain, jtag_select : jtag_type) = {
+    //CPU configuration
+    VexRiscvConfig(
+      plugins = List(
+        new IBusCachedPlugin(
+          resetVector = 0x80000000l,
+          prediction = STATIC,
+          config = InstructionCacheConfig(
+            cacheSize = 4096,
+            bytePerLine = 32,
+            wayCount = 1,
+            addressWidth = 32,
+            cpuDataWidth = 32,
+            memDataWidth = 32,
+            catchIllegalAccess = true,
+            catchAccessFault = true,
+            asyncTagMemory = false,
+            twoCycleRam = true,
+            twoCycleCache = true
+          )
+        ),
+        new DBusCachedPlugin(
+          config = new DataCacheConfig(
+            cacheSize         = 4096,
+            bytePerLine       = 32,
+            wayCount          = 1,
+            addressWidth      = 32,
+            cpuDataWidth      = 32,
+            memDataWidth      = 32,
+            catchAccessError  = true,
+            catchIllegal      = true,
+            catchUnaligned    = true
+          )
+        ),
+        new DecoderSimplePlugin(
+          catchIllegalInstruction = true
+        ),
+        new RegFilePlugin(
+          regFileReadyKind = plugin.SYNC,
+          zeroBoot = false
+        ),
+        new IntAluPlugin,
+        new SrcPlugin(
+          separatedAddSub = false,
+          executeInsertion = true
+        ),
+        new FullBarrelShifterPlugin,
+        new MulPlugin,
+        new DivPlugin,
+        new HazardSimplePlugin(
+          bypassExecute           = true,
+          bypassMemory            = true,
+          bypassWriteBack         = true,
+          bypassWriteBackBuffer   = true,
+          pessimisticUseSrc       = false,
+          pessimisticWriteRegFile = false,
+          pessimisticAddressMatch = false
+        ),
+        new BranchPlugin(
+          earlyBranch = false,
+          catchAddressMisaligned = true
+        ),
+        new PmpPluginNapot(
+          regions = 16,
+          granularity = 8,
+          ioRange = _(31 downto 28) === 0xf
+        ),
+        new ExternalInterruptArrayPlugin,
+        ifGen(jtag_select != jtag_type.none)(new DebugPlugin(debugClockDomain)),
+        new CsrPlugin(
+          config = CsrPluginConfig(
+            catchIllegalAccess = true,
+            mvendorid           = 1,
+            marchid             = 2,
+            mimpid              = 3,
+            mhartid             = 0,
+            misaExtensionsInit  = Riscv.misaToInt(s"ima"),
+            misaAccess          = CsrAccess.READ_WRITE,
+            mtvecAccess         = CsrAccess.READ_WRITE,
+            mtvecInit           = 0x80000020l,
+            mepcAccess          = CsrAccess.READ_WRITE,
+            mscratchGen         = true,
+            mcauseAccess        = CsrAccess.READ_WRITE,
+            mbadaddrAccess      = CsrAccess.READ_WRITE,
+            mcycleAccess        = CsrAccess.READ_WRITE,
+            minstretAccess      = CsrAccess.READ_WRITE,
+            ucycleAccess        = CsrAccess.NONE,
+            uinstretAccess      = CsrAccess.NONE,
+            wfiGenAsWait        = true,
+            ecallGen            = true,
+            userGen             = true,
+            medelegAccess       = CsrAccess.READ_WRITE,
+            midelegAccess       = CsrAccess.READ_WRITE
+          )
+        ),
+        new YamlPlugin("veronica_cpu0.yaml")
+      )
     )
-  )
+  }
 }
 
+case class Veronica (jtag_select : jtag_type) extends Component {
 
+    val io = new Bundle {
+      val aclk  = in Bool()
+      val arstn = in Bool()
 
-class Veronica(val config: VeronicaConfig) extends Component{
+      val ddr_clk = in Bool()
 
-  import config._
-  def vgaRgbConfig = RgbConfig(3,3,2)
+      val s_axi_dma0_aclk   = in Bool()
+      val s_axi_dma0_arstn  = in Bool()
 
-  val io = new Bundle{
-    //Clocks / reset
-    val arst    = in Bool()
-    val axi_clk = in Bool()
-    val vga_clk = in Bool()
-    val ddr_clk = in Bool()
+      val s_axi_dma1_aclk   = in Bool()
+      val s_axi_dma1_arstn  = in Bool()
 
-    val s_axi_dma0_aclk   = in Bool()
-    val s_axi_dma0_arstn  = in Bool()
+      val jtag  = ifGen(jtag_select == jtag_type.io)(slave(Jtag()))
 
-    //Main components IO
-//     val jtag       = slave(Jtag())
+      val irq   = in Bits(32 bits)
+      val timer_irq     = in Bool()
 
-    //external axi interfaces
-    val m_axi_mbus = master(Axi4(configBUS.getAxi4Config()))
-    val m_axi_acc  = master(AxiLite4(configBUS.getAxiLite4Config()))
-    val s_axi_dma0 = slave(Axi4(configBUS.getAxi4ConfigNoID()))
+      val m_axi_mbus = master(Axi4(configBUS.getAxi4Config()))
+      val s_axi_dma0 = slave(Axi4(configBUS.getAxi4ConfigNoID()))
+      val s_axi_dma1 = slave(Axi4(configBUS.getAxi4ConfigNoID()))
 
-    //Peripherals IO
-    val gpioA         = master(TriStateArray(32 bits))
-    val gpioB         = master(TriStateArray(32 bits))
-    val uart          = master(Uart())
-    val spi           = master(SpiMaster(ssWidth = 8))
-    val i2c           = master(I2c())
-    val vga           = master(Vga(vgaRgbConfig))
-    val irq           = in Bits(29 bits)
-  }
-
-  val resetCtrlClockDomain = ClockDomain(
-    clock = io.axi_clk,
-    config = ClockDomainConfig(
-      resetKind = BOOT
-    )
-  )
-
-  val resetCtrl = new ClockingArea(resetCtrlClockDomain) {
-    val systemResetUnbuffered  = False
-    //    val coreResetUnbuffered = False
-
-    //Implement an counter to keep the reset axiResetOrder high 64 cycles
-    // Also this counter will automaticly do a reset when the system boot.
-    val systemResetCounter = Reg(UInt(6 bits)) init(0)
-    when(systemResetCounter =/= U(systemResetCounter.range -> true)){
-      systemResetCounter := systemResetCounter + 1
-      systemResetUnbuffered := True
-    }
-    when(BufferCC(io.arst)){
-      systemResetCounter := 0
+      val m_axi_acc  = master(AxiLite4(configBUS.getAxiLite4Config()))
+      val m_axi_perf = master(AxiLite4(configBUS.getAxiLite4Config()))
     }
 
-    //Create all reset used later in the design
-    val systemReset  = RegNext(systemResetUnbuffered)
-    val axiReset     = RegNext(systemResetUnbuffered)
-    val vgaReset     = BufferCC(axiReset)
-  }
-
-  val axiClockDomain = ClockDomain(
-    clock = io.axi_clk,
-    reset = resetCtrl.axiReset,
-    frequency = FixedFrequency(100 MHz)
-  )
-
-  val debugClockDomain = ClockDomain(
-    clock = io.axi_clk,
-    reset = resetCtrl.systemReset,
-    frequency = FixedFrequency(100 MHz)
-  )
-
-  val vgaClockDomain = ClockDomain(
-    clock = io.vga_clk,
-    reset = resetCtrl.vgaReset,
-    frequency = FixedFrequency(25 MHz)
-  )
-
-  val ddrClockDomain = ClockDomain(
-    clock = io.ddr_clk,
-    reset = resetCtrl.axiReset,
-    frequency = FixedFrequency(200 MHz)
-  )
-
-  val axiSlaveDma0ClockDomain = ClockDomain(
-    clock = io.s_axi_dma0_aclk,
-    reset = io.s_axi_dma0_arstn
-  )
-
-
-  val axi = new ClockingArea(axiClockDomain) {
-    val ram = Axi4SharedOnChipRam(
-      dataWidth = 32,
-      byteCount = 8 kB,
-      idWidth   = 4
+    val resetCtrlClockDomain = ClockDomain(
+      clock = io.aclk,
+      config = ClockDomainConfig(
+        resetKind = BOOT
+      )
     )
 
-    val uartCtrl = Apb3UartCtrl(UartCtrlMemoryMappedConfig(
-      uartCtrlConfig = UartCtrlGenerics(
-        dataWidthMax      = 8,
-        clockDividerWidth = 20,
-        preSamplingSize   = 1,
-        samplingSize      = 3,
-        postSamplingSize  = 1
-      ),
-      initConfig = UartCtrlInitConfig(
-        baudrate = 115200,
-        dataLength = 7,  //7 => 8 bits
-        parity = UartParityType.NONE,
-        stop = UartStopType.ONE
-      ),
-      busCanWriteClockDividerConfig = false,
-      busCanWriteFrameConfig = false,
-      txFifoDepth = 16,
-      rxFifoDepth = 16
-    ))
+    val resetCtrl = new ClockingArea(resetCtrlClockDomain) {
+      val systemResetUnbuffered  = False
 
-    val spiCtrl = Apb3SpiMasterCtrl(SpiMasterCtrlMemoryMappedConfig(
-      ctrlGenerics = SpiMasterCtrlGenerics(
-        ssWidth = 8,
-        timerWidth = 32,
-        dataWidth = 8
-      )
-    ))
-
-    val i2cCtrl = new Apb3I2cCtrl(I2cSlaveMemoryMappedGenerics(
-      ctrlGenerics = I2cSlaveGenerics(
-        samplingWindowSize = 3,
-        samplingClockDividerWidth = 10 bits,
-        timeoutWidth = 20 bits
-      ),
-      addressFilterCount = 4,
-      masterGenerics = I2cMasterMemoryMappedGenerics(
-        timerWidth = 12
-      )
-    ))
-
-    val axi4dma0  = Axi4CC(configBUS.getAxi4ConfigNoID(), axiSlaveDma0ClockDomain, axiClockDomain, 16, 16, 16, 16, 16)
-
-    val axi4acc   = AxiLite4Output(configBUS.getAxi4Config())
-
-    val axi4mbus  = Axi4CC(configBUS.getAxi4Config(), axiClockDomain, ddrClockDomain, 16, 16, 16, 16, 16)
-
-    val timerInterrupt = False
-
-    val core = new Area{
-      val config = VexRiscvConfig(
-        plugins = cpuPlugins += new DebugPlugin(debugClockDomain)
-      )
-
-      val cpu = new VexRiscv(config)
-      var iBus : Axi4ReadOnly = null
-      var dBus : Axi4Shared = null
-
-      for(plugin <- config.plugins) plugin match{
-        case plugin : IBusCachedPlugin => iBus = plugin.iBus.toAxi4ReadOnly()
-        case plugin : DBusCachedPlugin => dBus = plugin.dBus.toAxi4Shared(true)
-        case plugin : ExternalInterruptArrayPlugin => {
-          io.irq <> plugin.externalInterruptArray(28 downto 0)
-          plugin.externalInterruptArray(29) := i2cCtrl.io.interrupt
-          plugin.externalInterruptArray(30) := spiCtrl.io.interrupt
-          plugin.externalInterruptArray(31) := uartCtrl.io.interrupt
-        }
-        case plugin : CsrPlugin        => {
-          plugin.timerInterrupt := timerInterrupt
-        }
-        case plugin : DebugPlugin      => debugClockDomain{
-//           resetCtrl.axiReset setWhen(RegNext(plugin.io.resetOut))
-//           io.jtag <> plugin.io.bus.fromJtag()
-            val jtagCtrl = JtagTapInstructionCtrl()
-            val tap = jtagCtrl.fromXilinxBscane2(userId = 2)
-            jtagCtrl <> plugin.io.bus.fromJtagInstructionCtrl(ClockDomain(tap.TCK), 0)
-        }
-        case _ =>
+      //Implement an counter to keep the reset axiResetOrder high 64 cycles
+      // Also this counter will automaticly do a reset when the system boot.
+      val systemResetCounter = Reg(UInt(6 bits)) init(0)
+      when(systemResetCounter =/= U(systemResetCounter.range -> true)){
+        systemResetCounter := systemResetCounter + 1
+        systemResetUnbuffered := True
       }
+
+      when(BufferCC(io.arstn) === False){
+        systemResetCounter := 0
+      }
+
+      //Create all reset used later in the design
+      val srst  = RegNext(systemResetUnbuffered)
     }
 
-    val apbBridge = Axi4SharedToApb3Bridge(
-      addressWidth = 20,
-      dataWidth    = 32,
-      idWidth      = 4
+    val axiClockDomain = ClockDomain(
+      clock = io.aclk,
+      reset = resetCtrl.srst
     )
 
-    val timer = new Apb3Timer()
-    timerInterrupt setWhen(timer.io.interrupt)
-
-    val gpioACtrl = Apb3Gpio(
-      gpioWidth = 32,
-      withReadSync = true
-    )
-    val gpioBCtrl = Apb3Gpio(
-      gpioWidth = 32,
-      withReadSync = true
+    val ddrClockDomain = ClockDomain(
+      clock = io.ddr_clk,
+      reset = resetCtrl.srst
     )
 
-    val vgaCtrlConfig = Axi4VgaCtrlGenerics(
-      axiAddressWidth = 32,
-      axiDataWidth    = 32,
-      burstLength     = 8,
-      frameSizeMax    = 2048*1512*2,
-      fifoSize        = 512,
-      rgbConfig       = vgaRgbConfig,
-      vgaClock        = vgaClockDomain
-    )
-    val vgaCtrl = Axi4VgaCtrl(vgaCtrlConfig)
-
-    val axiCrossbar = Axi4CrossbarFactory()
-
-    axiCrossbar.addSlaves(
-      ram.io.axi          -> (0x80000000L,   8 kB),
-      axi4mbus.io.input   -> (0x90000000L,   1 GB),
-      axi4acc.io.input    -> (0x70000000L,   256 MB),
-      apbBridge.io.axi    -> (0xF0000000L,   1 MB)
+    val axiSlaveDma0ClockDomain = ClockDomain(
+      clock = io.s_axi_dma0_aclk,
+      reset = io.s_axi_dma0_arstn
     )
 
-    axiCrossbar.addConnections(
-      core.iBus           -> List(ram.io.axi, axi4mbus.io.input),
-      core.dBus           -> List(ram.io.axi, axi4mbus.io.input, apbBridge.io.axi, axi4acc.io.input),
-      vgaCtrl.io.axi      -> List(axi4mbus.io.input),
-      axi4dma0.io.output  -> List(axi4mbus.io.input)
+    val axiSlaveDma1ClockDomain = ClockDomain(
+      clock = io.s_axi_dma1_aclk,
+      reset = io.s_axi_dma1_arstn
     )
 
+    val debugClockDomain = ClockDomain(
+      clock = io.aclk,
+      reset = resetCtrl.srst
+    )
 
-    axiCrossbar.addPipelining(apbBridge.io.axi)((crossbar,bridge) => {
-      crossbar.sharedCmd.halfPipe() >> bridge.sharedCmd
-      crossbar.writeData.halfPipe() >> bridge.writeData
-      crossbar.writeRsp             << bridge.writeRsp
-      crossbar.readRsp              << bridge.readRsp
-    })
-
-    axiCrossbar.addPipelining(ram.io.axi)((crossbar,ctrl) => {
-      crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
-      crossbar.writeData            >/-> ctrl.writeData
-      crossbar.writeRsp              <<  ctrl.writeRsp
-      crossbar.readRsp               <<  ctrl.readRsp
-    })
-
-    axiCrossbar.addPipelining(vgaCtrl.io.axi)((ctrl,crossbar) => {
-      ctrl.readCmd.halfPipe()    >>  crossbar.readCmd
-      ctrl.readRsp               <<  crossbar.readRsp
-    })
-
-    axiCrossbar.addPipelining(core.dBus)((cpu,crossbar) => {
-      cpu.sharedCmd             >>  crossbar.sharedCmd
-      cpu.writeData             >>  crossbar.writeData
-      cpu.writeRsp              <<  crossbar.writeRsp
-      cpu.readRsp               <-< crossbar.readRsp //Data cache directly use read responses without buffering, so pipeline it for FMax
-    })
-
-    axiCrossbar.build()
-
-
-    val apbDecoder = Apb3Decoder(
-      master = apbBridge.io.apb,
-      slaves = List(
-        gpioACtrl.io.apb -> (0x00000, 4 kB),
-        gpioBCtrl.io.apb -> (0x01000, 4 kB),
-        uartCtrl.io.apb  -> (0x10000, 4 kB),
-        timer.io.apb     -> (0x20000, 4 kB),
-        vgaCtrl.io.apb   -> (0x30000, 4 kB),
-        spiCtrl.io.apb   -> (0x40000, 4 kB),
-        i2cCtrl.io.apb   -> (0x50000, 4 kB)
+    val axi = new ClockingArea(axiClockDomain) {
+      val ram = Axi4SharedOnChipRam(
+        dataWidth = 32,
+        byteCount = 8 kB,
+        idWidth = 4
       )
-    )
-  }
+ 
+      val axi4acc  = AxiLite4Output(configBUS.getAxi4Config())
+      val axi4perf = AxiLite4Output(configBUS.getAxi4Config())
 
-  AxiLite4SpecRenamer(master(io.m_axi_acc)  .setName("m_axi_acc"))
+      val axi4mbus = Axi4CC(configBUS.getAxi4Config(), axiClockDomain, ddrClockDomain, 16, 16, 16, 16, 16)
 
-  Axi4SpecRenamer(master(io.m_axi_mbus).setName("m_axi_mbus"))
-  Axi4SpecRenamer(slave(io.s_axi_dma0) .setName("s_axi_dma0"))
+      val axi4dma0 = Axi4CC(configBUS.getAxi4ConfigNoID(), axiSlaveDma0ClockDomain, axiClockDomain, 16, 16, 16, 16, 16)
 
-  io.gpioA          <> axi.gpioACtrl.io.gpio
-  io.gpioB          <> axi.gpioBCtrl.io.gpio
-  io.uart           <> axi.uartCtrl.io.uart
-  io.spi            <> axi.spiCtrl.io.spi
-  io.vga            <> axi.vgaCtrl.io.vga
-  io.m_axi_mbus     <> axi.axi4mbus.io.output
-  io.m_axi_acc      <> axi.axi4acc.io.output
-  io.i2c            <> axi.i2cCtrl.io.i2c
-  io.s_axi_dma0     <> axi.axi4dma0.io.input
+      val axi4dma1 = Axi4CC(configBUS.getAxi4ConfigNoID(), axiSlaveDma1ClockDomain, axiClockDomain, 16, 16, 16, 16, 16)
+
+      val core = new Area{
+
+        val cpu = new VexRiscv(VeronicaBaseConfig.gen(debugClockDomain, jtag_select))
+        var iBus : Axi4ReadOnly = null
+        var dBus : Axi4Shared = null
+
+        for (plugin <- cpu.plugins) plugin match {
+          case plugin: IBusCachedPlugin => iBus = plugin.iBus.toAxi4ReadOnly()
+          case plugin: DBusCachedPlugin => dBus = plugin.dBus.toAxi4Shared(true)
+          case plugin: DebugPlugin => debugClockDomain {
+            jtag_select match {
+              case jtag_type.io => {
+                val jtag = slave(new Jtag()).setName("jtag")
+                io.jtag <> plugin.io.bus.fromJtag()
+              }
+              case jtag_type.xilinx_bscane => {
+                val jtagCtrl = JtagTapInstructionCtrl()
+                val tap = jtagCtrl.fromXilinxBscane2(userId = 2)
+                jtagCtrl <> plugin.io.bus.fromJtagInstructionCtrl(ClockDomain(tap.TCK), 0)
+              }
+              case _ =>
+            }
+          }
+          case plugin : ExternalInterruptArrayPlugin => {
+            io.irq <> plugin.externalInterruptArray
+          }
+          case plugin : CsrPlugin        => {
+            io.timer_irq <> plugin.timerInterrupt
+          }
+          case _ =>
+        }
+      }
+
+      val axiCrossbar = Axi4CrossbarFactory()
+
+      axiCrossbar.addSlaves(
+        ram.io.axi          -> (0x80000000L,     8 kB),
+        axi4acc.io.input    -> (0x70000000L,   256 MB),
+        axi4perf.io.input   -> (0x40000000L,   256 MB),
+        axi4mbus.io.input   -> (0x90000000L,     1 GB)
+      )
+
+      axiCrossbar.addConnections(
+        core.iBus           -> List(ram.io.axi, axi4mbus.io.input),
+        core.dBus           -> List(ram.io.axi, axi4acc.io.input, axi4perf.io.input, axi4mbus.io.input),
+        axi4dma0.io.output  -> List(axi4mbus.io.input),
+        axi4dma1.io.output  -> List(axi4mbus.io.input)
+      )
+
+      axiCrossbar.addPipelining(ram.io.axi)((crossbar,ctrl) => {
+        crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
+        crossbar.writeData            >/-> ctrl.writeData
+        crossbar.writeRsp              <<  ctrl.writeRsp
+        crossbar.readRsp               <<  ctrl.readRsp
+      })
+
+      axiCrossbar.addPipelining(core.dBus)((cpu,crossbar) => {
+        cpu.sharedCmd             >>  crossbar.sharedCmd
+        cpu.writeData             >>  crossbar.writeData
+        cpu.writeRsp              <<  crossbar.writeRsp
+        cpu.readRsp               <-< crossbar.readRsp //Data cache directly use read responses without buffering, so pipeline it for FMax
+      })
+
+      axiCrossbar.build()
+    }
+
+    AxiLite4SpecRenamer(master(io.m_axi_acc)  .setName("m_axi_acc"))
+    AxiLite4SpecRenamer(master(io.m_axi_perf) .setName("m_axi_perf"))
+
+    Axi4SpecRenamer(master(io.m_axi_mbus) .setName("m_axi_mbus"))
+
+    Axi4SpecRenamer(slave(io.s_axi_dma0) .setName("s_axi_dma0"))
+    Axi4SpecRenamer(slave(io.s_axi_dma1) .setName("s_axi_dma1"))
+
+    io.m_axi_acc      <> axi.axi4acc.io.output
+    io.m_axi_perf     <> axi.axi4perf.io.output
+
+    io.m_axi_mbus     <> axi.axi4mbus.io.output
+    io.s_axi_dma0     <> axi.axi4dma0.io.input
+    io.s_axi_dma1     <> axi.axi4dma1.io.input
 }
 
-object Veronica{
+object Veronica_Axi_JTAG_Xilinx_Bscane{
   def main(args: Array[String]) {
-    val config = SpinalConfig()
-    config.generateVerilog({
-      val toplevel = new Veronica(VeronicaConfig.default)
-      toplevel
-    })
+    Config.spinal.generateVerilog(Veronica(jtag_select = jtag_type.xilinx_bscane))
+  }
+}
+
+object Veronica_Axi_JTAG_IO{
+  def main(args: Array[String]) {
+    Config.spinal.generateVerilog(Veronica(jtag_select = jtag_type.io))
+  }
+}
+
+object Veronica_Axi{
+  def main(args: Array[String]) {
+    Config.spinal.generateVerilog(Veronica(jtag_select = jtag_type.none))
   }
 }
