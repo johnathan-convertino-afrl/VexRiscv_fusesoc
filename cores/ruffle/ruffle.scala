@@ -138,11 +138,10 @@ sealed trait jtag_type
 object jtag_type {
   case object io extends jtag_type
   case object xilinx_bscane extends jtag_type
-  case object none extends jtag_type
 }
 
 object RuffleBaseConfig{
-  def gen(debugClockDomain : ClockDomain, jtag_select : jtag_type) = {
+  def gen(debugClockDomain : ClockDomain) = {
       //CPU configuration
       VexRiscvConfig(
         plugins = List(
@@ -226,7 +225,7 @@ object RuffleBaseConfig{
             earlyBranch = false,
             catchAddressMisaligned = true
           ),
-          ifGen(jtag_select != jtag_type.none)(new DebugPlugin(debugClockDomain)),
+          new DebugPlugin(debugClockDomain),
           new FpuPlugin(externalFpu = false,p = FpuParameter(withDouble = false)),
           //new CsrPlugin(CsrPluginConfig.linuxFull(0x80000020l).copy(ebreakGen = false)),
           new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"imaf")).copy(utimeAccess = CsrAccess.READ_ONLY)),
@@ -334,7 +333,7 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
 
       val core = new Area{
 
-        val cpu = new VexRiscv(RuffleBaseConfig.gen(debugClockDomain, jtag_select))
+        val cpu = new VexRiscv(RuffleBaseConfig.gen(debugClockDomain))
         var iBus : Axi4ReadOnly = null
         var dBus : Axi4Shared = null
 
@@ -427,11 +426,5 @@ object Ruffle_Axi_JTAG_Xilinx_Bscane{
 object Ruffle_Axi_JTAG_IO{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Ruffle(jtag_select = jtag_type.io))
-  }
-}
-
-object Ruffle_Axi{
-  def main(args: Array[String]) {
-    Config.spinal.generateVerilog(Ruffle(jtag_select = jtag_type.none))
   }
 }

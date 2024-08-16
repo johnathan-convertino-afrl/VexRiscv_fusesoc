@@ -85,11 +85,10 @@ sealed trait jtag_type
 object jtag_type {
   case object io extends jtag_type
   case object xilinx_bscane extends jtag_type
-  case object none extends jtag_type
 }
 
 object VeronicaBaseConfig{
-  def gen(debugClockDomain : ClockDomain, jtag_select : jtag_type) = {
+  def gen(debugClockDomain : ClockDomain) = {
     //CPU configuration
     VexRiscvConfig(
       plugins = List(
@@ -157,7 +156,7 @@ object VeronicaBaseConfig{
           ioRange = _(31 downto 28) === 0xf
         ),
         new ExternalInterruptArrayPlugin,
-        ifGen(jtag_select != jtag_type.none)(new DebugPlugin(debugClockDomain)),
+        new DebugPlugin(debugClockDomain),
         new CsrPlugin(
           config = CsrPluginConfig(
             catchIllegalAccess = true,
@@ -206,8 +205,8 @@ case class Veronica (jtag_select : jtag_type) extends Component {
 
       val jtag  = ifGen(jtag_select == jtag_type.io)(slave(Jtag()))
 
-      val irq   = in Bits(32 bits)
-      val timer_irq     = in Bool()
+      val irq       = in Bits(32 bits)
+      val timer_irq = in Bool()
 
       val m_axi_mbus = master(Axi4(configBUS.getAxi4Config()))
       val s_axi_dma0 = slave(Axi4(configBUS.getAxi4ConfigNoID()))
@@ -286,7 +285,7 @@ case class Veronica (jtag_select : jtag_type) extends Component {
 
       val core = new Area{
 
-        val cpu = new VexRiscv(VeronicaBaseConfig.gen(debugClockDomain, jtag_select))
+        val cpu = new VexRiscv(VeronicaBaseConfig.gen(debugClockDomain))
         var iBus : Axi4ReadOnly = null
         var dBus : Axi4Shared = null
 
@@ -375,11 +374,5 @@ object Veronica_Axi_JTAG_Xilinx_Bscane{
 object Veronica_Axi_JTAG_IO{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Veronica(jtag_select = jtag_type.io))
-  }
-}
-
-object Veronica_Axi{
-  def main(args: Array[String]) {
-    Config.spinal.generateVerilog(Veronica(jtag_select = jtag_type.none))
   }
 }
