@@ -42,10 +42,10 @@ object configBUS {
     dataWidth = 32,
     useId = false,
     useRegion = false,
-    useBurst = false,
+    useBurst = true,
     useLock = false,
     useQos = false,
-    useResp = false
+    useResp = true
   )
     
   def getAxiLite4Config() = AxiLite4Config(
