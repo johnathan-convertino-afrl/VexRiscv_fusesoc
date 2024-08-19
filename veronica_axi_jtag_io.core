@@ -4,7 +4,7 @@ name : spinalhdl:cpu:veronica_axi_jtag_io:1.0.0
 filesets:
   rtl:
     files:
-      - cores/ruffle/Veronica.v
+      - cores/veronica/Veronica.v
     file_type : verilogSource
 
   dep:
