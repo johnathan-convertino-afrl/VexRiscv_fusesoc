@@ -17,7 +17,7 @@ generate:
   gen_spinalHDL:
     generator: spinalhdl
     parameters:
-      src_dir: cores/ruffle
+      src_dir: cores/veronica
       build_args: ["runMain", "vexriscv.afrl.Veronica_Axi_JTAG_IO"]
 
 targets:
