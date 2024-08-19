@@ -343,7 +343,6 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
           case plugin: DebugPlugin => debugClockDomain {
             jtag_select match {
               case jtag_type.io => {
-                val jtag = slave(new Jtag()).setName("jtag")
                 io.jtag <> plugin.io.bus.fromJtag()
               }
               case jtag_type.xilinx_bscane => {
