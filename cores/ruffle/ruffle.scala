@@ -42,10 +42,10 @@ object configBUS {
     dataWidth = 32,
     useId = false,
     useRegion = false,
-    useBurst = false,
+    useBurst = true,
     useLock = false,
     useQos = false,
-    useResp = false
+    useResp = true
   )
     
   def getAxiLite4Config() = AxiLite4Config(
@@ -225,7 +225,7 @@ object RuffleBaseConfig{
             earlyBranch = false,
             catchAddressMisaligned = true
           ),
-          new DebugPlugin(debugClockDomain),
+          new DebugPlugin(debugClockDomain, 0),
           new FpuPlugin(externalFpu = false,p = FpuParameter(withDouble = false)),
           //new CsrPlugin(CsrPluginConfig.linuxFull(0x80000020l).copy(ebreakGen = false)),
           new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"imaf")).copy(utimeAccess = CsrAccess.READ_ONLY)),
@@ -239,15 +239,16 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
 
     val io = new Bundle {
       val aclk  = in Bool()
-      val arstn = in Bool()
+      val arst  = in Bool()
 
       val ddr_clk = in Bool()
+      val ddr_rst = in Bool()
 
       val s_axi_dma0_aclk   = in Bool()
-      val s_axi_dma0_arstn  = in Bool()
+      val s_axi_dma0_arst   = in Bool()
 
       val s_axi_dma1_aclk   = in Bool()
-      val s_axi_dma1_arstn  = in Bool()
+      val s_axi_dma1_arst   = in Bool()
 
       val jtag  = ifGen(jtag_select == jtag_type.io)(slave(Jtag()))
 
@@ -279,7 +280,7 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
         systemResetUnbuffered := True
       }
 
-      when(BufferCC(io.arstn) === False){
+      when(BufferCC(io.arstn)){
         systemResetCounter := 0
       }
 
@@ -294,17 +295,17 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
 
     val ddrClockDomain = ClockDomain(
       clock = io.ddr_clk,
-      reset = resetCtrl.srst
+      reset = io.ddr_rst
     )
 
     val axiSlaveDma0ClockDomain = ClockDomain(
       clock = io.s_axi_dma0_aclk,
-      reset = io.s_axi_dma0_arstn
+      reset = io.s_axi_dma0_arst
     )
 
     val axiSlaveDma1ClockDomain = ClockDomain(
       clock = io.s_axi_dma1_aclk,
-      reset = io.s_axi_dma1_arstn
+      reset = io.s_axi_dma1_arst
     )
 
     val debugClockDomain = ClockDomain(
@@ -341,6 +342,7 @@ case class Ruffle (jtag_select : jtag_type) extends Component {
           case plugin: IBusCachedPlugin => iBus = plugin.iBus.toAxi4ReadOnly()
           case plugin: DBusCachedPlugin => dBus = plugin.dBus.toAxi4Shared(true)
           case plugin: DebugPlugin => debugClockDomain {
+            resetCtrl.srst setWhen(RegNext(plugin.io.resetOut))
             jtag_select match {
               case jtag_type.io => {
                 io.jtag <> plugin.io.bus.fromJtag()
