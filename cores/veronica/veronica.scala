@@ -203,11 +203,11 @@ case class Veronica (jtag_select : jtag_type, ram_size : BigInt = 8 kB) extends 
       val ddr_clk  = in Bool()
       val ddr_rst  = in Bool()
 
-      val s_axi_dma0_aclk   = in Bool()
-      val s_axi_dma0_arst   = in Bool()
-
-      val s_axi_dma1_aclk   = in Bool()
-      val s_axi_dma1_arst   = in Bool()
+//       val s_axi_dma0_aclk   = in Bool()
+//       val s_axi_dma0_arst   = in Bool()
+//
+//       val s_axi_dma1_aclk   = in Bool()
+//       val s_axi_dma1_arst   = in Bool()
 
       val jtag  = ifGen(jtag_select == jtag_type.io)(slave(Jtag()))
 
@@ -215,8 +215,8 @@ case class Veronica (jtag_select : jtag_type, ram_size : BigInt = 8 kB) extends 
       val timer_irq = in Bool()
 
       val m_axi_mbus = master(Axi4(configBUS.getAxi4Config()))
-      val s_axi_dma0 = slave(Axi4(configBUS.getAxi4ConfigNoID()))
-      val s_axi_dma1 = slave(Axi4(configBUS.getAxi4ConfigNoID()))
+//       val s_axi_dma0 = slave(Axi4(configBUS.getAxi4ConfigNoID()))
+//       val s_axi_dma1 = slave(Axi4(configBUS.getAxi4ConfigNoID()))
 
       val m_axi_acc  = master(AxiLite4(configBUS.getAxiLite4Config()))
       val m_axi_perf = master(AxiLite4(configBUS.getAxiLite4Config()))
@@ -270,25 +270,25 @@ case class Veronica (jtag_select : jtag_type, ram_size : BigInt = 8 kB) extends 
       )
     )
 
-    val axiSlaveDma0ClockDomain = ClockDomain(
-      clock = io.s_axi_dma0_aclk,
-      reset = io.s_axi_dma0_arst,
-      config = ClockDomainConfig(
-        clockEdge        = RISING,
-        resetKind        = spinal.core.SYNC,
-        resetActiveLevel = HIGH
-      )
-    )
-
-    val axiSlaveDma1ClockDomain = ClockDomain(
-      clock = io.s_axi_dma1_aclk,
-      reset = io.s_axi_dma1_arst,
-      config = ClockDomainConfig(
-        clockEdge        = RISING,
-        resetKind        = spinal.core.SYNC,
-        resetActiveLevel = HIGH
-      )
-    )
+//     val axiSlaveDma0ClockDomain = ClockDomain(
+//       clock = io.s_axi_dma0_aclk,
+//       reset = io.s_axi_dma0_arst,
+//       config = ClockDomainConfig(
+//         clockEdge        = RISING,
+//         resetKind        = spinal.core.SYNC,
+//         resetActiveLevel = HIGH
+//       )
+//     )
+//
+//     val axiSlaveDma1ClockDomain = ClockDomain(
+//       clock = io.s_axi_dma1_aclk,
+//       reset = io.s_axi_dma1_arst,
+//       config = ClockDomainConfig(
+//         clockEdge        = RISING,
+//         resetKind        = spinal.core.SYNC,
+//         resetActiveLevel = HIGH
+//       )
+//     )
 
     val debugClockDomain = ClockDomain(
       clock = io.aclk,
@@ -308,23 +308,23 @@ case class Veronica (jtag_select : jtag_type, ram_size : BigInt = 8 kB) extends 
         arwStage = true
       )
 
-      val vram = Axi4SharedOnChipRam(
-        dataWidth = configBUS.getAxi4Config().dataWidth,
-        byteCount = ram_size,
-        idWidth = configBUS.getAxi4Config().idWidth,
-        arwStage = true
-      )
+//       val vram = Axi4SharedOnChipRam(
+//         dataWidth = configBUS.getAxi4Config().dataWidth,
+//         byteCount = ram_size,
+//         idWidth = configBUS.getAxi4Config().idWidth,
+//         arwStage = true
+//       )
 
-      //vram.ram.init(Seq.fill(ram_size.intValue()/(configBUS.getAxi4Config().dataWidth/8))(0x000000FFL))
+//       vram.ram.initBigInt(Seq.range(0x00000000L, ram_size.intValue()/(configBUS.getAxi4Config().dataWidth/8))) //range(1, 15)
  
       val axi4acc  = AxiLite4Output(configBUS.getAxi4Config())
       val axi4perf = AxiLite4Output(configBUS.getAxi4Config())
 
-      val axi4mbus = Axi4SharedCC(configBUS.getAxi4Config(), axiClockDomain, ddrClockDomain, 2, 2, 2, 2)
+      val axi4mbus = Axi4CC(configBUS.getAxi4Config(), axiClockDomain, ddrClockDomain, 32, 32, 32, 32, 32)
 
-      val axi4dma0 = Axi4CC(configBUS.getAxi4ConfigNoID(), axiSlaveDma0ClockDomain, axiClockDomain, 2, 2, 2, 2, 2)
-
-      val axi4dma1 = Axi4CC(configBUS.getAxi4ConfigNoID(), axiSlaveDma1ClockDomain, axiClockDomain, 2, 2, 2, 2, 2)
+//       val axi4dma0 = Axi4CC(configBUS.getAxi4ConfigNoID(), axiSlaveDma0ClockDomain, axiClockDomain, 2, 2, 2, 2, 2)
+//
+//       val axi4dma1 = Axi4CC(configBUS.getAxi4ConfigNoID(), axiSlaveDma1ClockDomain, axiClockDomain, 2, 2, 2, 2, 2)
 
       val core = new Area{
 
@@ -364,7 +364,7 @@ case class Veronica (jtag_select : jtag_type, ram_size : BigInt = 8 kB) extends 
 
       axiCrossbar.addSlaves(
         ram.io.axi          -> (0x80000000L, ram_size),
-        vram.io.axi         -> (0x20000000L, ram_size),
+//         vram.io.axi         -> (0x20000000L, ram_size),
         axi4acc.io.input    -> (0x70000000L,   256 MB),
         axi4perf.io.input   -> (0x40000000L,   256 MB),
         axi4mbus.io.input   -> (0x90000000L,     1 GB)
@@ -372,31 +372,24 @@ case class Veronica (jtag_select : jtag_type, ram_size : BigInt = 8 kB) extends 
 
       axiCrossbar.addConnections(
         core.iBus           -> List(ram.io.axi, axi4mbus.io.input),
-        core.dBus           -> List(ram.io.axi, vram.io.axi, axi4acc.io.input, axi4perf.io.input, axi4mbus.io.input),
-        axi4dma0.io.output  -> List(axi4mbus.io.input),
-        axi4dma1.io.output  -> List(vram.io.axi)
+        core.dBus           -> List(ram.io.axi, axi4acc.io.input, axi4perf.io.input, axi4mbus.io.input)
+//         axi4dma0.io.output  -> List(axi4mbus.io.input),
+//         axi4dma1.io.output  -> List(axi4mbus.io.input)
       )
 
-//       axiCrossbar.addPipelining(ram.io.axi)((crossbar,ctrl) => {
-//         crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
-//         crossbar.writeData            >/-> ctrl.writeData
-//         crossbar.writeRsp              <<  ctrl.writeRsp
-//         crossbar.readRsp               <<  ctrl.readRsp
-//       })
-//
-//       axiCrossbar.addPipelining(vram.io.axi)((crossbar,ctrl) => {
-//         crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
-//         crossbar.writeData            >/-> ctrl.writeData
-//         crossbar.writeRsp              <<  ctrl.writeRsp
-//         crossbar.readRsp               <<  ctrl.readRsp
-//       })
-//
-//       axiCrossbar.addPipelining(core.dBus)((cpu,crossbar) => {
-//         cpu.sharedCmd             >>  crossbar.sharedCmd
-//         cpu.writeData             >>  crossbar.writeData
-//         cpu.writeRsp              <<  crossbar.writeRsp
-//         cpu.readRsp               <-< crossbar.readRsp //Data cache directly use read responses without buffering, so pipeline it for FMax
-//       })
+      axiCrossbar.addPipelining(ram.io.axi)((crossbar,ctrl) => {
+        crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
+        crossbar.writeData            >/-> ctrl.writeData
+        crossbar.writeRsp              <<  ctrl.writeRsp
+        crossbar.readRsp               <<  ctrl.readRsp
+      })
+
+      axiCrossbar.addPipelining(core.dBus)((cpu,crossbar) => {
+        cpu.sharedCmd             >>  crossbar.sharedCmd
+        cpu.writeData             >>  crossbar.writeData
+        cpu.writeRsp              <<  crossbar.writeRsp
+        cpu.readRsp               <-< crossbar.readRsp //Data cache directly use read responses without buffering, so pipeline it for FMax
+      })
 
       axiCrossbar.build()
     }
@@ -406,15 +399,15 @@ case class Veronica (jtag_select : jtag_type, ram_size : BigInt = 8 kB) extends 
 
     Axi4SpecRenamer(master(io.m_axi_mbus) .setName("m_axi_mbus"))
 
-    Axi4SpecRenamer(slave(io.s_axi_dma0) .setName("s_axi_dma0"))
-    Axi4SpecRenamer(slave(io.s_axi_dma1) .setName("s_axi_dma1"))
+//     Axi4SpecRenamer(slave(io.s_axi_dma0) .setName("s_axi_dma0"))
+//     Axi4SpecRenamer(slave(io.s_axi_dma1) .setName("s_axi_dma1"))
 
     io.m_axi_acc      <> axi.axi4acc.io.output
     io.m_axi_perf     <> axi.axi4perf.io.output
+    io.m_axi_mbus     <> axi.axi4mbus.io.output
 
-    io.m_axi_mbus           <> axi.axi4mbus.io.output.toAxi4()
-    axi.axi4dma0.io.input   <> io.s_axi_dma0
-    axi.axi4dma1.io.input   <> io.s_axi_dma1
+//     axi.axi4dma0.io.input   <> io.s_axi_dma0
+//     axi.axi4dma1.io.input   <> io.s_axi_dma1
 }
 
 object Veronica_Axi_JTAG_Xilinx_Bscane{
