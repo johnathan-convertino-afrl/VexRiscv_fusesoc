@@ -1,0 +1,33 @@
+CAPI=2:
+name : spinalhdl:cpu:veronica_axi_linux_jtag_io:1.0.0
+
+filesets:
+  rtl:
+    files:
+      - cores/veronica/Veronica.v
+    file_type : verilogSource
+
+  #bin:
+    #files:
+      #- cores/veronica/Veronica.v_toplevel_axi_vram_ram_symbol0.bin : { file_type : user, copyto : . }
+      #- cores/veronica/Veronica.v_toplevel_axi_vram_ram_symbol1.bin : { file_type : user, copyto : . }
+      #- cores/veronica/Veronica.v_toplevel_axi_vram_ram_symbol2.bin : { file_type : user, copyto : . }
+      #- cores/veronica/Veronica.v_toplevel_axi_vram_ram_symbol3.bin : { file_type : user, copyto : . }
+
+  dep:
+    depend:
+      - spinalhdl:repo:spinalhdl:1.10.1
+      - spinalhdl:repo:vexriscv:1.10.1
+      - AFRL:utility:generators:1.0.0
+
+generate:
+  gen_spinalHDL:
+    generator: spinalhdl
+    parameters:
+      src_dir: cores/veronica
+      build_args: ["runMain", "vexriscv.afrl.Veronica_Axi_Linux_JTAG_IO"]
+
+targets:
+  default:
+    filesets: [rtl, dep]
+    generate: [gen_spinalHDL]
