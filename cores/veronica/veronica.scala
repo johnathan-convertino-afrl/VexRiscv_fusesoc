@@ -138,14 +138,14 @@ class Axi4Plic(sourceCount : Int, targetCount : Int) extends Component{
 
 sealed trait jtag_type
 object jtag_type {
-  case object io extends jtag_type
+  case object io            extends jtag_type
   case object xilinx_bscane extends jtag_type
-  case object none extends jtag_type
+  case object none          extends jtag_type
 }
 
 case class VeronicaConfig(  jtag_select : jtag_type,
-                            ram_size : BigInt = 8 kB,
-                            cpuPlugins : ArrayBuffer[Plugin[VexRiscv]])
+                            ram_size    : BigInt = 8 kB,
+                            cpuPlugins  : ArrayBuffer[Plugin[VexRiscv]])
 
 object VeronicaConfig{
 
@@ -351,7 +351,7 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       val arst  = RegNext(systemResetUnbuffered)
     }
 
-    val axiClockDomain = ClockDomain(
+    val busClockDomain = ClockDomain(
       clock = io.aclk,
       reset = resetCtrl.arst,
       config = ClockDomainConfig(
@@ -381,7 +381,7 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       )
     )
 
-    val axi = new ClockingArea(axiClockDomain) {
+    val axi = new ClockingArea(busClockDomain) {
       val ram = Axi4SharedOnChipRam(
         dataWidth = configBUS.getAxi4Config().dataWidth,
         byteCount = config.ram_size,
@@ -392,7 +392,7 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       val axi4acc  = AxiLite4Output(configBUS.getAxi4Config())
       val axi4perf = AxiLite4Output(configBUS.getAxi4Config())
 
-      val axi4mbus = Axi4CC(configBUS.getAxi4Config(), axiClockDomain, ddrClockDomain, 32, 32, 32, 32, 32)
+      val axi4mbus = Axi4CC(configBUS.getAxi4Config(), busClockDomain, ddrClockDomain, 32, 32, 32, 32, 32)
 
       var clintCtrl : Axi4Clint = null
       var plicCtrl  : Axi4Plic  = null
@@ -420,8 +420,12 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         }
 
         for (plugin <- cpu.plugins) plugin match {
-          case plugin: IBusCachedPlugin => iBus = plugin.iBus.toAxi4ReadOnly()
-          case plugin: DBusCachedPlugin => dBus = plugin.dBus.toAxi4Shared(true)
+          case plugin: IBusCachedPlugin => {
+            iBus = plugin.iBus.toAxi4ReadOnly()
+          }
+          case plugin: DBusCachedPlugin => {
+            dBus = plugin.dBus.toAxi4Shared(true)
+          }
           case plugin: DebugPlugin => debugClockDomain {
             resetCtrl.arst setWhen(RegNext(plugin.io.resetOut))
             io.debug_rst <> plugin.io.resetOut
