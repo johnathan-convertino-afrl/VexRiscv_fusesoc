@@ -214,8 +214,33 @@ object VeronicaConfig{
         new StaticMemoryTranslatorPlugin(
           ioRange = _(31 downto 28) === 0xF
         ),
-        new ExternalInterruptArrayPlugin,
-        new CsrPlugin(CsrPluginConfig.smallest(mtvecInit = 0x80000020l)),
+        new CsrPlugin(
+          config = CsrPluginConfig(
+            catchIllegalAccess  = false,
+            mvendorid           = 1,
+            marchid             = 2,
+            mimpid              = 3,
+            mhartid             = 0,
+            misaExtensionsInit  = 0x101064, // RV32GCFMU???????
+            misaAccess          = CsrAccess.READ_WRITE,
+            mtvecAccess         = CsrAccess.READ_WRITE,
+            mtvecInit           = 0x80000020l,
+            mepcAccess          = CsrAccess.READ_WRITE,
+            mscratchGen         = true,
+            mcauseAccess        = CsrAccess.READ_WRITE,
+            mbadaddrAccess      = CsrAccess.READ_WRITE,
+            mcycleAccess        = CsrAccess.READ_WRITE,
+            minstretAccess      = CsrAccess.READ_WRITE,
+            ucycleAccess        = CsrAccess.READ_ONLY,
+            uinstretAccess      = CsrAccess.READ_ONLY,
+            wfiGenAsWait        = true,
+            ecallGen            = true,
+            userGen             = true,
+            medelegAccess       = CsrAccess.READ_WRITE,
+            midelegAccess       = CsrAccess.READ_WRITE,
+            utimeAccess         = CsrAccess.READ_ONLY
+          )
+        ),
         new YamlPlugin("veronica_cpu0.yaml")
       )
     )
@@ -228,7 +253,35 @@ object VeronicaConfig{
     //Replace static memory translator with pmp translator
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new PmpPluginNapot(regions = 16,granularity = 8,ioRange = _(31 downto 28) === 0xf)
 
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) = new CsrPlugin(CsrPluginConfig.secure(0x00000020l))
+    //Replace standard CSR with secure CSR.
+    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) =
+      new CsrPlugin(
+          config = CsrPluginConfig(
+            catchIllegalAccess  = true,
+            mvendorid           = 1,
+            marchid             = 2,
+            mimpid              = 3,
+            mhartid             = 0,
+            misaExtensionsInit  = 0x101064, // RV32GCFMU???????
+            misaAccess          = CsrAccess.READ_WRITE,
+            mtvecAccess         = CsrAccess.READ_WRITE,
+            mtvecInit           = 0x80000020l,
+            mepcAccess          = CsrAccess.READ_WRITE,
+            mscratchGen         = true,
+            mcauseAccess        = CsrAccess.READ_WRITE,
+            mbadaddrAccess      = CsrAccess.READ_WRITE,
+            mcycleAccess        = CsrAccess.READ_WRITE,
+            minstretAccess      = CsrAccess.READ_WRITE,
+            ucycleAccess        = CsrAccess.READ_ONLY,
+            uinstretAccess      = CsrAccess.READ_ONLY,
+            wfiGenAsWait        = true,
+            ecallGen            = true,
+            userGen             = true,
+            medelegAccess       = CsrAccess.READ_WRITE,
+            midelegAccess       = CsrAccess.READ_WRITE,
+            utimeAccess         = CsrAccess.READ_ONLY
+          )
+        )
 
     config
   }
@@ -236,10 +289,13 @@ object VeronicaConfig{
   def linux = {
     val config = default
 
+    //Replace static memory translater with MMU plugin
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new MmuPlugin(ioRange = _(31 downto 28) === 0xF)
 
+    //Replace standard CSR with linux CSR.
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) = new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"imaf")).copy(utimeAccess = CsrAccess.READ_ONLY))
 
+    //Change original ibus with mmu ibus
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[IBusCachedPlugin])) =
       new IBusCachedPlugin(
         resetVector = 0x80000000l,
@@ -265,6 +321,7 @@ object VeronicaConfig{
         )
       )
 
+    //Change original dbus with mmu dbus
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[DBusCachedPlugin])) =
       new DBusCachedPlugin(
         config = new DataCacheConfig(
@@ -293,8 +350,8 @@ object VeronicaConfig{
         )
       )
 
-    // remove external interrupt plugin and add in FPU plugin instead
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[ExternalInterruptArrayPlugin])) = new FpuPlugin(externalFpu = false,p = FpuParameter(withDouble = false))
+    // floating point unit wthout double support
+    config.cpuPlugins += new FpuPlugin(externalFpu = false,p = FpuParameter(withDouble = false))
 
     config
   }
@@ -414,9 +471,13 @@ case class Veronica (val config: VeronicaConfig) extends Component {
 
         val linux = cpu.plugins.exists(_.isInstanceOf[MmuPlugin])
 
+        clintCtrl = new Axi4Clint(1)
+
         if(linux) {
-          clintCtrl = new Axi4Clint(1)
           plicCtrl  = new Axi4Plic(sourceCount = 32, targetCount = 2)
+        }
+        else {
+          plicCtrl  = new Axi4Plic(sourceCount = 32, targetCount = 1)
         }
 
         for (plugin <- cpu.plugins) plugin match {
@@ -441,21 +502,15 @@ case class Veronica (val config: VeronicaConfig) extends Component {
               case _ =>
             }
           }
-          case plugin : ExternalInterruptArrayPlugin => {
-            io.irq <> plugin.externalInterruptArray
-          }
-          case plugin : CsrPlugin        => {
+          case plugin : CsrPlugin => {
+            plugin.timerInterrupt     := clintCtrl.io.timerInterrupt(0)
+            plugin.softwareInterrupt  := clintCtrl.io.softwareInterrupt(0)
+            plugin.externalInterrupt  := plicCtrl.io.targets(0)
             if(linux) {
-              plugin.timerInterrupt     := clintCtrl.io.timerInterrupt(0)
-              plugin.softwareInterrupt  := clintCtrl.io.softwareInterrupt(0)
-              plugin.externalInterrupt  := plicCtrl.io.targets(0)
               plugin.externalInterruptS := plicCtrl.io.targets(1)
-              plugin.utime              := clintCtrl.io.time
-              io.irq                    <> plicCtrl.io.sources
             }
-            else {
-              io.timer_irq <> plugin.timerInterrupt
-            }
+            plugin.utime              := clintCtrl.io.time
+            io.irq                    <> plicCtrl.io.sources
           }
           case _ =>
         }
@@ -467,30 +522,15 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         ram.io.axi          -> (0x80000000L,   config.ram_size),
         axi4acc.io.input    -> (0x70000000L,   256 MB),
         axi4perf.io.input   -> (0x40000000L,   256 MB),
-        axi4mbus.io.input   -> (0x90000000L,     1 GB)
+        axi4mbus.io.input   -> (0x90000000L,     1 GB),
+        clintCtrl.io.bus    -> (0x02000000L,    48 kB),
+        plicCtrl.io.bus     -> (0x0C000000L,     4 MB)
       )
-
-      if(core.linux) {
-        axiCrossbar.addSlaves(
-          clintCtrl.io.bus    -> (0x02000000L,    48 kB),
-          plicCtrl.io.bus     -> (0x0C000000L,     4 MB)
-        )
-      }
 
       axiCrossbar.addConnections(
-          core.iBus           -> List(ram.io.axi, axi4mbus.io.input)
+        core.iBus -> List(ram.io.axi, axi4mbus.io.input),
+        core.dBus -> List(ram.io.axi, clintCtrl.io.bus, plicCtrl.io.bus, axi4acc.io.input, axi4perf.io.input, axi4mbus.io.input)
       )
-
-      if(core.linux) {
-        axiCrossbar.addConnections(
-          core.dBus           -> List(ram.io.axi, clintCtrl.io.bus, plicCtrl.io.bus, axi4acc.io.input, axi4perf.io.input, axi4mbus.io.input)
-        )
-      }
-      else {
-        axiCrossbar.addConnections(
-          core.dBus           -> List(ram.io.axi, axi4acc.io.input, axi4perf.io.input, axi4mbus.io.input)
-        )
-      }
 
       axiCrossbar.addPipelining(ram.io.axi)((crossbar,ctrl) => {
         crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
