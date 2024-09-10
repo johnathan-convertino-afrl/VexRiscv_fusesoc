@@ -156,6 +156,7 @@ object VeronicaConfig{
         new IBusCachedPlugin(
           resetVector = 0x80000000l,
           prediction = STATIC,
+          compressedGen = true,
           config = InstructionCacheConfig(
             cacheSize = 4096,
             bytePerLine = 32,
@@ -166,8 +167,8 @@ object VeronicaConfig{
             catchIllegalAccess = true,
             catchAccessFault = true,
             asyncTagMemory = false,
-            twoCycleRam = true,
-            twoCycleCache = true
+            twoCycleRam = false,
+            twoCycleCache = false
           )
         ),
         new DBusCachedPlugin(
@@ -180,7 +181,9 @@ object VeronicaConfig{
             memDataWidth      = 32,
             catchAccessError  = true,
             catchIllegal      = true,
-            catchUnaligned    = true
+            catchUnaligned    = true,
+            withLrSc          = true,
+            withAmo           = true
           )
         ),
         new DecoderSimplePlugin(
@@ -212,7 +215,7 @@ object VeronicaConfig{
           catchAddressMisaligned = true
         ),
         new StaticMemoryTranslatorPlugin(
-          ioRange = _(31 downto 28) === 0xF
+          ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7)
         ),
         new CsrPlugin(
           config = CsrPluginConfig(
@@ -221,7 +224,7 @@ object VeronicaConfig{
             marchid             = 2,
             mimpid              = 3,
             mhartid             = 0,
-            misaExtensionsInit  = 0x101064, // RV32GCFMU???????
+            misaExtensionsInit  = Riscv.misaToInt(s"imac"),
             misaAccess          = CsrAccess.READ_WRITE,
             mtvecAccess         = CsrAccess.READ_WRITE,
             mtvecInit           = 0x80000020l,
@@ -251,7 +254,7 @@ object VeronicaConfig{
     val config = default
 
     //Replace static memory translator with pmp translator
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new PmpPluginNapot(regions = 16,granularity = 8,ioRange = _(31 downto 28) === 0xf)
+    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new PmpPluginNapot(regions = 16,granularity = 8,ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7))
 
     //Replace standard CSR with secure CSR.
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) =
@@ -262,7 +265,7 @@ object VeronicaConfig{
             marchid             = 2,
             mimpid              = 3,
             mhartid             = 0,
-            misaExtensionsInit  = 0x101064, // RV32GCFMU???????
+            misaExtensionsInit  = Riscv.misaToInt(s"imac"),
             misaAccess          = CsrAccess.READ_WRITE,
             mtvecAccess         = CsrAccess.READ_WRITE,
             mtvecInit           = 0x80000020l,
@@ -290,16 +293,17 @@ object VeronicaConfig{
     val config = default
 
     //Replace static memory translater with MMU plugin
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new MmuPlugin(ioRange = _(31 downto 28) === 0xF)
+    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new MmuPlugin(ioRange = _(31 downto 28) === 0x4)
 
     //Replace standard CSR with linux CSR.
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) = new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"imaf")).copy(utimeAccess = CsrAccess.READ_ONLY))
+    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) = new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"imacf")).copy(utimeAccess = CsrAccess.READ_ONLY))
 
     //Change original ibus with mmu ibus
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[IBusCachedPlugin])) =
       new IBusCachedPlugin(
         resetVector = 0x80000000l,
         prediction = STATIC,
+        compressedGen = true,
         config = InstructionCacheConfig(
           cacheSize = 4096,
           bytePerLine = 64,
@@ -310,8 +314,8 @@ object VeronicaConfig{
           catchIllegalAccess = true,
           catchAccessFault = true,
           asyncTagMemory = false,
-          twoCycleRam = true,
-          twoCycleCache = true
+          twoCycleRam = false,
+          twoCycleCache = false
         ),
         memoryTranslatorPortConfig = MmuPortConfig(
           portTlbSize = 4,
@@ -334,8 +338,8 @@ object VeronicaConfig{
           catchAccessError  = true,
           catchIllegal      = true,
           catchUnaligned    = true,
-          withLrSc = true,
-          withAmo = true,
+          withLrSc          = true,
+          withAmo           = true,
           withWriteAggregation = false
         ),
         dBusCmdMasterPipe = true,
@@ -362,17 +366,16 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     import config._
 
     val io = new Bundle {
-      val aclk  = in Bool()
-      val arst  = in Bool()
+      val aclk      = in Bool()
+      val arst      = in Bool()
       val debug_rst = ifGen(jtag_select != jtag_type.none)(out Bool())
 
-      val ddr_clk  = in Bool()
-      val ddr_rst  = in Bool()
+      val ddr_clk   = in Bool()
+      val ddr_rst   = in Bool()
 
-      val jtag  = ifGen(jtag_select == jtag_type.io)(slave(Jtag()))
+      val jtag      = ifGen(jtag_select == jtag_type.io)(slave(Jtag()))
 
       val irq       = in Bits(32 bits)
-      val timer_irq = in Bool()
 
       val m_axi_mbus = master(Axi4(configBUS.getAxi4Config()))
 
@@ -383,8 +386,8 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     val resetCtrlClockDomain = ClockDomain(
       clock = io.aclk,
       config = ClockDomainConfig(
-        resetKind        = BOOT,
-        clockEdge        = RISING
+        resetKind = BOOT,
+        clockEdge = RISING
       )
     )
 
@@ -442,8 +445,8 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       val ram = Axi4SharedOnChipRam(
         dataWidth = configBUS.getAxi4Config().dataWidth,
         byteCount = config.ram_size,
-        idWidth = configBUS.getAxi4Config().idWidth,
-        arwStage = true
+        idWidth   = configBUS.getAxi4Config().idWidth,
+        arwStage  = true
       )
  
       val axi4acc  = AxiLite4Output(configBUS.getAxi4Config())
@@ -474,10 +477,10 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         clintCtrl = new Axi4Clint(1)
 
         if(linux) {
-          plicCtrl  = new Axi4Plic(sourceCount = 32, targetCount = 2)
+          plicCtrl = new Axi4Plic(sourceCount = 32, targetCount = 2)
         }
         else {
-          plicCtrl  = new Axi4Plic(sourceCount = 32, targetCount = 1)
+          plicCtrl = new Axi4Plic(sourceCount = 32, targetCount = 1)
         }
 
         for (plugin <- cpu.plugins) plugin match {
