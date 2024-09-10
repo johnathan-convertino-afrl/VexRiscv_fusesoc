@@ -156,7 +156,7 @@ object VeronicaConfig{
         new IBusCachedPlugin(
           resetVector = 0x80000000l,
           prediction = STATIC,
-          compressedGen = true,
+          compressedGen = false,
           config = InstructionCacheConfig(
             cacheSize = 4096,
             bytePerLine = 32,
@@ -167,8 +167,8 @@ object VeronicaConfig{
             catchIllegalAccess = true,
             catchAccessFault = true,
             asyncTagMemory = false,
-            twoCycleRam = false,
-            twoCycleCache = false
+            twoCycleRam = true,
+            twoCycleCache = true
           )
         ),
         new DBusCachedPlugin(
@@ -224,7 +224,7 @@ object VeronicaConfig{
             marchid             = 2,
             mimpid              = 3,
             mhartid             = 0,
-            misaExtensionsInit  = Riscv.misaToInt(s"imac"),
+            misaExtensionsInit  = Riscv.misaToInt(s"ima"),
             misaAccess          = CsrAccess.READ_WRITE,
             mtvecAccess         = CsrAccess.READ_WRITE,
             mtvecInit           = 0x80000020l,
@@ -265,7 +265,7 @@ object VeronicaConfig{
             marchid             = 2,
             mimpid              = 3,
             mhartid             = 0,
-            misaExtensionsInit  = Riscv.misaToInt(s"imac"),
+            misaExtensionsInit  = Riscv.misaToInt(s"ima"),
             misaAccess          = CsrAccess.READ_WRITE,
             mtvecAccess         = CsrAccess.READ_WRITE,
             mtvecInit           = 0x80000020l,
@@ -293,17 +293,17 @@ object VeronicaConfig{
     val config = default
 
     //Replace static memory translater with MMU plugin
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new MmuPlugin(ioRange = _(31 downto 28) === 0x4)
+    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new MmuPlugin(ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7))
 
     //Replace standard CSR with linux CSR.
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) = new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"imacf")).copy(utimeAccess = CsrAccess.READ_ONLY))
+    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) = new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"imaf")).copy(utimeAccess = CsrAccess.READ_ONLY))
 
     //Change original ibus with mmu ibus
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[IBusCachedPlugin])) =
       new IBusCachedPlugin(
         resetVector = 0x80000000l,
         prediction = STATIC,
-        compressedGen = true,
+        compressedGen = false,
         config = InstructionCacheConfig(
           cacheSize = 4096,
           bytePerLine = 64,
@@ -314,8 +314,8 @@ object VeronicaConfig{
           catchIllegalAccess = true,
           catchAccessFault = true,
           asyncTagMemory = false,
-          twoCycleRam = false,
-          twoCycleCache = false
+          twoCycleRam = true,
+          twoCycleCache = true
         ),
         memoryTranslatorPortConfig = MmuPortConfig(
           portTlbSize = 4,
