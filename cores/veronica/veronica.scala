@@ -375,10 +375,12 @@ case class Veronica (val config: VeronicaConfig) extends Component {
 
       val jtag      = ifGen(jtag_select == jtag_type.io)(slave(Jtag()))
 
-      val irq       = in Bits(32 bits)
+      val irq       = in Bits(128 bits)
 
+      //System Port for memory (IBUS/DBUS)
       val m_axi_mbus = master(Axi4(configBUS.getAxi4Config()))
 
+      //Peripheral Ports for devices (DBUS ONLY)
       val m_axi_acc  = master(AxiLite4(configBUS.getAxiLite4Config()))
       val m_axi_perf = master(AxiLite4(configBUS.getAxiLite4Config()))
     }
@@ -477,10 +479,10 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         clintCtrl = new Axi4Clint(1)
 
         if(linux) {
-          plicCtrl = new Axi4Plic(sourceCount = 32, targetCount = 2)
+          plicCtrl = new Axi4Plic(sourceCount = 127, targetCount = 2)
         }
         else {
-          plicCtrl = new Axi4Plic(sourceCount = 32, targetCount = 1)
+          plicCtrl = new Axi4Plic(sourceCount = 127, targetCount = 1)
         }
 
         for (plugin <- cpu.plugins) plugin match {
@@ -513,7 +515,7 @@ case class Veronica (val config: VeronicaConfig) extends Component {
               plugin.externalInterruptS := plicCtrl.io.targets(1)
             }
             plugin.utime              := clintCtrl.io.time
-            io.irq                    <> plicCtrl.io.sources
+            plicCtrl.io.sources       := io.irq >> 1
           }
           case _ =>
         }
