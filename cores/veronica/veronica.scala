@@ -215,7 +215,7 @@ object VeronicaConfig{
           catchAddressMisaligned = true
         ),
         new StaticMemoryTranslatorPlugin(
-          ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7)
+          ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 24) === 0x0C || x(31 downto 24) === 0x02)
         ),
         new CsrPlugin(
           config = CsrPluginConfig(
@@ -255,7 +255,7 @@ object VeronicaConfig{
     val config = default
 
     //Replace static memory translator with pmp translator
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new PmpPluginNapot(regions = 16,granularity = 8,ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7))
+    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new PmpPluginNapot(regions = 16,granularity = 8,ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 24) === 0x0C || x(31 downto 24) === 0x02))
 
     //Replace standard CSR with secure CSR.
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) =
