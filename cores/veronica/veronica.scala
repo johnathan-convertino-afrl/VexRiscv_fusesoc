@@ -137,7 +137,8 @@ object VeronicaConfig{
         new IBusCachedPlugin(
           resetVector = 0x80000000l,
           prediction = STATIC,
-          compressedGen = false,
+          compressedGen = true,
+          relaxedPcCalculation = true,
           config = InstructionCacheConfig(
             cacheSize = 4096,
             bytePerLine = 32,
@@ -148,8 +149,8 @@ object VeronicaConfig{
             catchIllegalAccess = true,
             catchAccessFault = true,
             asyncTagMemory = false,
-            twoCycleRam = true,
-            twoCycleCache = true
+            twoCycleRam = false,
+            twoCycleCache = false
           )
         ),
         new DBusCachedPlugin(
@@ -205,7 +206,7 @@ object VeronicaConfig{
             marchid             = 0,
             mimpid              = 0,
             mhartid             = 0,
-            misaExtensionsInit  = Riscv.misaToInt(s"ima"),
+            misaExtensionsInit  = Riscv.misaToInt(s"imac"),
             misaAccess          = CsrAccess.READ_WRITE,
             mtvecAccess         = CsrAccess.READ_WRITE,
             xtvecModeGen        = true,
@@ -236,7 +237,7 @@ object VeronicaConfig{
     val config = default
 
     //Replace static memory translator with pmp translator
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new PmpPluginNapot(regions = 16,granularity = 8,ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 28) === 0x0))
+    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new PmpPlugin(regions = 8,ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 28) === 0x0))
 
     //Replace standard CSR with secure CSR.
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) =
@@ -247,7 +248,7 @@ object VeronicaConfig{
             marchid             = 0,
             mimpid              = 0,
             mhartid             = 0,
-            misaExtensionsInit  = Riscv.misaToInt(s"ima"),
+            misaExtensionsInit  = Riscv.misaToInt(s"imac"),
             misaAccess          = CsrAccess.READ_WRITE,
             mtvecAccess         = CsrAccess.READ_WRITE,
             xtvecModeGen        = true,
@@ -287,6 +288,7 @@ object VeronicaConfig{
         resetVector = 0x80000000l,
         prediction = STATIC,
         compressedGen = false,
+        relaxedPcCalculation = true,
         config = InstructionCacheConfig(
           cacheSize = 4096,
           bytePerLine = 64,
@@ -297,7 +299,7 @@ object VeronicaConfig{
           catchIllegalAccess = true,
           catchAccessFault = true,
           asyncTagMemory = false,
-          twoCycleRam = true,
+          twoCycleRam = false,
           twoCycleCache = true
         ),
         memoryTranslatorPortConfig = MmuPortConfig(
