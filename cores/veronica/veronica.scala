@@ -32,7 +32,7 @@ object configBUS {
     dataWidth = 32,
     idWidth = 4,
     useId = true,
-    useRegion = true,
+    useRegion = false,
     useBurst = true,
     useLock = true,
     useQos = true,
