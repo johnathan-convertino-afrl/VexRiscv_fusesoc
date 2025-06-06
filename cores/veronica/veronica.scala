@@ -280,7 +280,7 @@ object VeronicaConfig{
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new MmuPlugin(ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 28) === 0x0))
 
     //Replace standard CSR with linux CSR.
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) = new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"imaf")).copy(utimeAccess = CsrAccess.READ_ONLY))
+    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) = new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"imaf")).copy(mtvecInit = 0x80000020l, utimeAccess = CsrAccess.READ_ONLY))
 
     //Change original ibus with mmu ibus
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[IBusCachedPlugin])) =
@@ -291,7 +291,7 @@ object VeronicaConfig{
         relaxedPcCalculation = true,
         config = InstructionCacheConfig(
           cacheSize = 4096,
-          bytePerLine = 64,
+          bytePerLine = 32,
           wayCount = 1,
           addressWidth = 32,
           cpuDataWidth = 32,
@@ -300,7 +300,7 @@ object VeronicaConfig{
           catchAccessFault = true,
           asyncTagMemory = false,
           twoCycleRam = false,
-          twoCycleCache = true
+          twoCycleCache = false
         ),
         memoryTranslatorPortConfig = MmuPortConfig(
           portTlbSize = 4,
@@ -315,7 +315,7 @@ object VeronicaConfig{
       new DBusCachedPlugin(
         config = new DataCacheConfig(
           cacheSize         = 4096,
-          bytePerLine       = 64,
+          bytePerLine       = 32,
           wayCount          = 1,
           addressWidth      = 32,
           cpuDataWidth      = 32,
