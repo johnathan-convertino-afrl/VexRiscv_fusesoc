@@ -280,14 +280,14 @@ object VeronicaConfig{
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new MmuPlugin(ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 28) === 0x0))
 
     //Replace standard CSR with linux CSR.
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) = new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"imaf")).copy(mtvecInit = 0x80000020l, utimeAccess = CsrAccess.READ_ONLY))
+    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) = new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"imac")).copy(mtvecInit = 0x80000020l, xtvecModeGen = true, utimeAccess = CsrAccess.READ_ONLY))
 
     //Change original ibus with mmu ibus
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[IBusCachedPlugin])) =
       new IBusCachedPlugin(
         resetVector = 0x80000000l,
         prediction = STATIC,
-        compressedGen = false,
+        compressedGen = true,
         relaxedPcCalculation = true,
         config = InstructionCacheConfig(
           cacheSize = 4096,
@@ -340,7 +340,7 @@ object VeronicaConfig{
       )
 
     // floating point unit wthout double support
-    config.cpuPlugins += new FpuPlugin(externalFpu = false,p = FpuParameter(withDouble = false))
+    // config.cpuPlugins += new FpuPlugin(externalFpu = false,p = FpuParameter(withDouble = false))
 
     config
   }
