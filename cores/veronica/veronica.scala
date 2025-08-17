@@ -4,6 +4,7 @@ import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba3.apb._
 import spinal.lib.misc.HexTools
+import spinal.lib.misc._
 import spinal.lib.misc.plic._
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.bus.amba4.axilite._
@@ -58,7 +59,7 @@ object configBUS {
 }
 
 //axi lite connection
-case class AxiLite4Output(axiConfig : Axi4Config) extends Component{
+case class Axi4SharedToAxiLite4(axiConfig : Axi4Config) extends Component{
   val io = new Bundle {
     val input  = slave(Axi4Shared(axiConfig))
     val output = master(AxiLite4(AxiLite4Config(
@@ -75,7 +76,7 @@ case class AxiLite4Output(axiConfig : Axi4Config) extends Component{
 }
 
 //axi connection
-case class Axi4Output(axiConfig : Axi4Config) extends Component{
+case class Axi4SharedToAxi4(axiConfig : Axi4Config) extends Component{
   val io = new Bundle {
     val input  = slave(Axi4Shared(axiConfig))
     val output = master(Axi4(axiConfig))
@@ -84,14 +85,33 @@ case class Axi4Output(axiConfig : Axi4Config) extends Component{
   io.output <> io.input.toAxi4()
 }
 
+case class Axi4Clint(hartCount : Int, bufferTime : Boolean = false) extends Component{
+  val io = new Bundle {
+    val bus = slave(Axi4(configBUS.getAxi4Config()))
+    val timerInterrupt = out Bits(hartCount bits)
+    val softwareInterrupt = out Bits(hartCount bits)
+    val time = out UInt(64 bits)
+  }
 
-class Apb3Plic(sourceCount : Int, targetCount : Int) extends Component{
+  val factory = new Axi4SlaveFactory(io.bus)
+  val logic = Clint(0 until hartCount)
+  logic.driveFrom(factory, bufferTime)
+
+  for(hartId <- 0 until hartCount){
+    io.timerInterrupt(hartId) := logic.harts(hartId).timerInterrupt
+    io.softwareInterrupt(hartId) := logic.harts(hartId).softwareInterrupt
+  }
+
+  io.time := logic.time
+}
+
+class Axi4Plic(sourceCount : Int, targetCount : Int) extends Component{
   val priorityWidth = 2
   val plicMapping = PlicMapping.sifive
   import plicMapping._
-
+  
   val io = new Bundle {
-    val bus = slave(Apb3(22,configBUS.getAxi4Config().dataWidth))
+    val bus = slave(Axi4(configBUS.getAxi4Config()))
     val sources = in Bits (sourceCount bits)
     val targets = out Bits (targetCount bits)
   }
@@ -110,12 +130,95 @@ class Apb3Plic(sourceCount : Int, targetCount : Int) extends Component{
 
   io.targets := targets.map(_.iep).asBits
 
-  val bus = Apb3SlaveFactory(io.bus)
+  val bus = new Axi4SlaveFactory(io.bus)
   val mapping = PlicMapper(bus, plicMapping)(
     gateways = gateways,
     targets = targets
   )
 }
+
+// class Axi4SharedRom(onChipRamBinFile : String) extends Component{
+//   import java.nio.file.{Files, Paths}
+//   val byteArray = Files.readAllBytes(Paths.get(onChipRamBinFile))
+//   val wordCount = (byteArray.length+3)/4
+//   val buffer = ByteBuffer.wrap(Files.readAllBytes(Paths.get(onChipRamBinFile))).order(ByteOrder.LITTLE_ENDIAN);
+//   val wordArray = (0 until wordCount).map(i => {
+//     val v = buffer.getInt
+//     if(v < 0)  BigInt(v.toLong & 0xFFFFFFFFl) else  BigInt(v)
+//   })
+// 
+//   val io = new Bundle{
+//     val bus = slave(Apb3(22,configBUS.getAxi4Config().dataWidth))
+//   }
+//   val rom = Mem(Bits(32 bits), wordCount) initBigInt(wordArray)
+// //  io.bus.PRDATA := rom.readSync(io.apb.PADDR >> 2)
+//   io.bus.PRDATA := rom.readAsync(RegNext(io.apb.PADDR >> 2))
+//   io.bus.PREADY := True
+// }
+
+// case class Axi4ReadOnlyCC(axiConfig : Axi4Config,
+//                           inputCd : ClockDomain,
+//                           outputCd : ClockDomain,
+//                           arFifoSize : Int,
+//                           rFifoSize : Int) extends Component{
+//   val io = new Bundle {
+//     val input = slave(Axi4ReadOnly(axiConfig))
+//     val output = master(Axi4ReadOnly(axiConfig))
+//   }
+// 
+//   io.output.ar << io.input.ar.queue(arFifoSize, inputCd, outputCd)
+//   io.input.r   << io.output.r.queue(rFifoSize, outputCd, inputCd)
+// }
+
+// need to remove write connections
+// class Axi4SharedOnChipRom(dataWidth : Int, byteCount : BigInt, idWidth : Int, arwStage : Boolean = false, onChipRamBinFile : String) extends Component{
+//   val axiConfig = Axi4SharedOnChipRam.getAxiConfig(dataWidth,byteCount,idWidth)
+// 
+//   import java.nio.file.{Files, Paths}
+//   val byteArray = Files.readAllBytes(Paths.get(onChipRamBinFile))
+//   val wordCount = (byteArray.length+3)/4
+//   val buffer = ByteBuffer.wrap(Files.readAllBytes(Paths.get(onChipRamBinFile))).order(ByteOrder.LITTLE_ENDIAN);
+//   val wordArray = (0 until wordCount).map(i => {
+//     val v = buffer.getInt
+//     if(v < 0)  BigInt(v.toLong & 0xFFFFFFFFl) else  BigInt(v)
+//   })
+//   
+//   val io = new Bundle {
+//     val axi = slave(Axi4Shared(axiConfig))
+//   }
+// 
+//   val wordCount = byteCount / axiConfig.bytePerWord
+// //   val ram = Mem(axiConfig.dataType,wordCount.toInt)
+//   val rom = Mem(axiConfig.dataType, wordCount.toInt) initBigInt(wordArray)
+//   val wordRange = log2Up(wordCount) + log2Up(axiConfig.bytePerWord)-1 downto log2Up(axiConfig.bytePerWord)
+// 
+//   val arw = if(arwStage) io.axi.arw.s2mPipe().unburstify.m2sPipe() else io.axi.arw.unburstify
+//   val stage0 = arw.haltWhen(arw.write && !io.axi.writeData.valid)
+//   io.axi.readRsp.data := ram.readWriteSync(
+//     address = stage0.addr(axiConfig.wordRange).resized,
+//     data = io.axi.writeData.data,
+//     enable = stage0.fire,
+//     write = stage0.write,
+//     mask = io.axi.writeData.strb
+//   )
+//   io.axi.writeData.ready :=  arw.valid && arw.write  && stage0.ready
+// 
+//   val stage1 = stage0.stage()
+//   stage1.ready := (io.axi.readRsp.ready && !stage1.write) || ((io.axi.writeRsp.ready || ! stage1.last) && stage1.write)
+// 
+//   io.axi.readRsp.valid  := stage1.valid && !stage1.write
+//   io.axi.readRsp.id  := stage1.id
+//   io.axi.readRsp.last := stage1.last
+//   io.axi.readRsp.setOKAY()
+//   if(axiConfig.useRUser) io.axi.readRsp.user  := stage1.user
+// 
+//   io.axi.writeRsp.valid := stage1.valid &&  stage1.write && stage1.last
+//   io.axi.writeRsp.setSLVERR()
+//   io.axi.writeRsp.id := stage1.id
+//   if(axiConfig.useBUser) io.axi.writeRsp.user := stage1.user
+// 
+//   io.axi.arw.ready.noBackendCombMerge //Verilator perf
+// }
 
 sealed trait jtag_type
 object jtag_type {
@@ -125,7 +228,10 @@ object jtag_type {
 }
 
 case class VeronicaConfig(  jtag_select : jtag_type,
-                            ram_size    : BigInt = 8 kB,
+                            ddr_size    : BigInt = 1 GB,
+                            ram_size    : BigInt = 16 kB,
+                            rom_size    : BigInt = 16 kB,
+                            rom_name    : String = "zebbs.bin",
                             cpuPlugins  : ArrayBuffer[Plugin[VexRiscv]])
 
 object VeronicaConfig{
@@ -200,32 +306,9 @@ object VeronicaConfig{
           ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 28) === 0x0)
         ),
         new CsrPlugin(
-          config = CsrPluginConfig(
-            catchIllegalAccess  = false,
-            mvendorid           = 0,
-            marchid             = 0,
-            mimpid              = 0,
-            mhartid             = 0,
-            misaExtensionsInit  = Riscv.misaToInt(s"imac"),
-            misaAccess          = CsrAccess.READ_WRITE,
-            mtvecAccess         = CsrAccess.READ_WRITE,
-            xtvecModeGen        = true,
-            mtvecInit           = 0x80000020l,
-            mepcAccess          = CsrAccess.READ_WRITE,
-            mscratchGen         = true,
-            mcauseAccess        = CsrAccess.READ_WRITE,
-            mbadaddrAccess      = CsrAccess.READ_WRITE,
-            mcycleAccess        = CsrAccess.READ_WRITE,
-            minstretAccess      = CsrAccess.READ_WRITE,
-            ucycleAccess        = CsrAccess.READ_ONLY,
-            uinstretAccess      = CsrAccess.READ_ONLY,
-            wfiGenAsWait        = true,
-            ecallGen            = true,
-            userGen             = true,
-            medelegAccess       = CsrAccess.READ_WRITE,
-            midelegAccess       = CsrAccess.READ_WRITE,
-            utimeAccess         = CsrAccess.READ_ONLY
-          )
+          CsrPluginConfig.openSbi(
+            mhartid = 0,
+            misa = Riscv.misaToInt(s"imac")).copy(mtvecInit = 0x80000020l, xtvecModeGen = true, utimeAccess = CsrAccess.READ_ONLY)
         ),
         new YamlPlugin("veronica_cpu0.yaml")
       )
@@ -240,35 +323,35 @@ object VeronicaConfig{
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new PmpPluginNapot(regions = 8,granularity = 8,ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 28) === 0x0))
 
     //Replace standard CSR with secure CSR.
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) =
-      new CsrPlugin(
-          config = CsrPluginConfig(
-            catchIllegalAccess  = true,
-            mvendorid           = 0,
-            marchid             = 0,
-            mimpid              = 0,
-            mhartid             = 0,
-            misaExtensionsInit  = Riscv.misaToInt(s"imac"),
-            misaAccess          = CsrAccess.READ_WRITE,
-            mtvecAccess         = CsrAccess.READ_WRITE,
-            xtvecModeGen        = true,
-            mtvecInit           = 0x80000020l,
-            mepcAccess          = CsrAccess.READ_WRITE,
-            mscratchGen         = true,
-            mcauseAccess        = CsrAccess.READ_WRITE,
-            mbadaddrAccess      = CsrAccess.READ_WRITE,
-            mcycleAccess        = CsrAccess.READ_WRITE,
-            minstretAccess      = CsrAccess.READ_WRITE,
-            ucycleAccess        = CsrAccess.READ_ONLY,
-            uinstretAccess      = CsrAccess.READ_ONLY,
-            wfiGenAsWait        = true,
-            ecallGen            = true,
-            userGen             = true,
-            medelegAccess       = CsrAccess.READ_WRITE,
-            midelegAccess       = CsrAccess.READ_WRITE,
-            utimeAccess         = CsrAccess.READ_ONLY
-          )
-        )
+//     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) =
+//       new CsrPlugin(
+//           config = CsrPluginConfig(
+//             catchIllegalAccess  = true,
+//             mvendorid           = 0,
+//             marchid             = 0,
+//             mimpid              = 0,
+//             mhartid             = 0,
+//             misaExtensionsInit  = Riscv.misaToInt(s"imac"),
+//             misaAccess          = CsrAccess.READ_WRITE,
+//             mtvecAccess         = CsrAccess.READ_WRITE,
+//             xtvecModeGen        = true,
+//             mtvecInit           = 0x80000020l,
+//             mepcAccess          = CsrAccess.READ_WRITE,
+//             mscratchGen         = true,
+//             mcauseAccess        = CsrAccess.READ_WRITE,
+//             mbadaddrAccess      = CsrAccess.READ_WRITE,
+//             mcycleAccess        = CsrAccess.READ_WRITE,
+//             minstretAccess      = CsrAccess.READ_WRITE,
+//             ucycleAccess        = CsrAccess.READ_ONLY,
+//             uinstretAccess      = CsrAccess.READ_ONLY,
+//             wfiGenAsWait        = true,
+//             ecallGen            = true,
+//             userGen             = true,
+//             medelegAccess       = CsrAccess.READ_WRITE,
+//             midelegAccess       = CsrAccess.READ_WRITE,
+//             utimeAccess         = CsrAccess.READ_ONLY
+//           )
+//         )
 
     config
   }
@@ -278,9 +361,6 @@ object VeronicaConfig{
 
     //Replace static memory translater with MMU plugin
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new MmuPlugin(ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 28) === 0x0))
-
-    //Replace standard CSR with linux CSR.
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[CsrPlugin])) = new CsrPlugin(CsrPluginConfig.openSbi(mhartid = 0, misa = Riscv.misaToInt(s"imac")).copy(mtvecInit = 0x80000020l, xtvecModeGen = true, utimeAccess = CsrAccess.READ_ONLY))
 
     //Change original ibus with mmu ibus
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[IBusCachedPlugin])) =
@@ -351,6 +431,8 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     import config._
 
     val io = new Bundle {
+//       val cpu_clk   = in Bool()
+//       val cpu_rst   = in Bool()
       val aclk      = in Bool()
       val arst      = in Bool()
       val debug_rst = ifGen(jtag_select != jtag_type.none)(out Bool())
@@ -389,6 +471,7 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         systemResetUnbuffered := True
       }
 
+//       when(BufferCC(io.cpu_rst)){
       when(BufferCC(io.arst)){
         systemResetCounter := 0
       }
@@ -398,8 +481,9 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       val arst  = RegNext(systemResetUnbuffered)
     }
 
-    val busClockDomain = ClockDomain(
+    val cpuClockDomain = ClockDomain(
       clock = io.aclk,
+//       clock = io.cpu_clk,
       reset = resetCtrl.arst,
       config = ClockDomainConfig(
         clockEdge        = RISING,
@@ -417,6 +501,16 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         resetActiveLevel = HIGH
       )
     )
+    
+//     val busClockDomain = ClockDomain(
+//       clock = io.aclk,
+//       reset = io.arst,
+//       config = ClockDomainConfig(
+//         clockEdge        = RISING,
+//         resetKind        = spinal.core.SYNC,
+//         resetActiveLevel = HIGH
+//       )
+//     )
 
     val debugClockDomain = ClockDomain(
       clock = io.aclk,
@@ -428,21 +522,39 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       )
     )
 
-    val axi = new ClockingArea(busClockDomain) {
+    val axiCPU = new ClockingArea(cpuClockDomain) {
       val ram = Axi4SharedOnChipRam(
         dataWidth = configBUS.getAxi4Config().dataWidth,
         byteCount = config.ram_size,
         idWidth   = configBUS.getAxi4Config().idWidth,
         arwStage  = true
       )
+      
+//       val rom = Axi4SharedOnChipRom(
+//         dataWidth = configBUS.getAxi4Config().dataWidth,
+//         byteCount = config.rom_size,
+//         idWidth   = configBUS.getAxi4Config().idWidth,
+//         arwStage  = true,
+//         config.rom_name
+//       )
  
-      val axi4acc  = AxiLite4Output(configBUS.getAxi4Config())
-      val axi4perf = AxiLite4Output(configBUS.getAxi4Config())
+      val axi4acc  = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
+      val axi4perf = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
 
-      val axi4mbus = Axi4CC(configBUS.getAxi4Config(), busClockDomain, ddrClockDomain, 32, 32, 32, 32, 32)
+//       Should be fairly easy, just add this inbetween and change names
+//       val axi4accCC    = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32, 32)
+//       val axi4perfCC   = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32, 32)
 
-      var clintCtrl : Apb3Clint = null
-      var plicCtrl  : Apb3Plic  = null
+//       Harder, the below will need to have a new clocking area created and then moved to it before the CC can be used.
+//       val axi4ramCC    = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32, 32)
+//       val axi4romCC    = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32, 32)
+//       val axi4clintCC  = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32, 32)
+//       val axi4plicCC   = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32, 32)
+      
+      val axi4mbusCC = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, ddrClockDomain, 32, 32, 32, 32, 32)
+
+      var clintCtrl : Axi4Clint = null
+      var plicCtrl  : Axi4Plic  = null
 
       val core = new Area{
 
@@ -459,16 +571,9 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         var iBus : Axi4ReadOnly = null
         var dBus : Axi4Shared = null
 
-        val linux = cpu.plugins.exists(_.isInstanceOf[MmuPlugin])
+        clintCtrl = new Axi4Clint(1)
 
-        clintCtrl = new Apb3Clint(1)
-
-        if(linux) {
-          plicCtrl = new Apb3Plic(sourceCount = 127, targetCount = 2)
-        }
-        else {
-          plicCtrl = new Apb3Plic(sourceCount = 127, targetCount = 1)
-        }
+        plicCtrl = new Axi4Plic(sourceCount = 127, targetCount = 2)
 
         for (plugin <- cpu.plugins) plugin match {
           case plugin: IBusCachedPlugin => {
@@ -496,9 +601,7 @@ case class Veronica (val config: VeronicaConfig) extends Component {
             plugin.timerInterrupt     := clintCtrl.io.timerInterrupt(0)
             plugin.softwareInterrupt  := clintCtrl.io.softwareInterrupt(0)
             plugin.externalInterrupt  := plicCtrl.io.targets(0)
-            if(linux) {
-              plugin.externalInterruptS := plicCtrl.io.targets(1)
-            }
+            plugin.externalInterruptS := plicCtrl.io.targets(1)
             plugin.utime              := clintCtrl.io.time
             plicCtrl.io.sources       := io.irq >> 1
           }
@@ -506,33 +609,24 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         }
       }
 
-      val apbBridge = Axi4SharedToApb3Bridge(
-        addressWidth = configBUS.getAxi4Config().addressWidth,
-        dataWidth    = configBUS.getAxi4Config().dataWidth,
-        idWidth      = configBUS.getAxi4Config().idWidth
-      )
-
       val axiCrossbar = Axi4CrossbarFactory()
 
+//       rom.io.axi          -> (0x20000000L,   config.rom_size)
+//       apbBridge.io.axi    -> (0x00000000L,   256 MB)
       axiCrossbar.addSlaves(
-        ram.io.axi          -> (0x80000000L,   config.ram_size),
-        axi4acc.io.input    -> (0x70000000L,   256 MB),
-        axi4perf.io.input   -> (0x40000000L,   256 MB),
-        axi4mbus.io.input   -> (0x90000000L,     1 GB),
-        apbBridge.io.axi    -> (0x00000000L,   256 MB)
+        axi4acc.io.input          -> (0x70000000L,   256 MB),
+        axi4perf.io.input         -> (0x40000000L,   256 MB),
+        axi4mbusCC.io.input       -> (0x90000000L,   config.ddr_size),
+        clintCtrl.io.bus          -> (0x02000000,     64 kB),
+        plicCtrl.io.bus           -> (0x0C000000,      4 MB),
+        ram.io.axi                -> (0x80000000L,   config.ram_size)
       )
 
+//       rom.io.axi
       axiCrossbar.addConnections(
-        core.iBus -> List(ram.io.axi, axi4mbus.io.input),
-        core.dBus -> List(ram.io.axi, apbBridge.io.axi, axi4acc.io.input, axi4perf.io.input, axi4mbus.io.input)
+        core.iBus -> List(ram.io.axi, axi4mbusCC.io.input),
+        core.dBus -> List(ram.io.axi, axi4mbusCC.io.input, clintCtrl.io.bus, plicCtrl.io.bus, axi4acc.io.input, axi4perf.io.input) //apbBridge.io.axi,
       )
-
-      axiCrossbar.addPipelining(apbBridge.io.axi)((crossbar,bridge) => {
-        crossbar.sharedCmd.halfPipe() >> bridge.sharedCmd
-        crossbar.writeData.halfPipe() >> bridge.writeData
-        crossbar.writeRsp             << bridge.writeRsp
-        crossbar.readRsp              << bridge.readRsp
-      })
 
       axiCrossbar.addPipelining(ram.io.axi)((crossbar,ctrl) => {
         crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
@@ -550,23 +644,16 @@ case class Veronica (val config: VeronicaConfig) extends Component {
 
       axiCrossbar.build()
 
-      val apbDecoder = Apb3Decoder(
-        master = apbBridge.io.apb,
-        slaves = List(
-          clintCtrl.io.bus -> (0x02000000, 64 kB),
-          plicCtrl.io.bus  -> (0x0C000000,  4 MB)
-        )
-      )
     }
 
     AxiLite4SpecRenamer(master(io.m_axi_acc)  .setName("m_axi_acc"))
     AxiLite4SpecRenamer(master(io.m_axi_perf) .setName("m_axi_perf"))
 
     Axi4SpecRenamer(master(io.m_axi_mbus) .setName("m_axi_mbus"))
-
-    io.m_axi_acc      <> axi.axi4acc.io.output
-    io.m_axi_perf     <> axi.axi4perf.io.output
-    io.m_axi_mbus     <> axi.axi4mbus.io.output
+    
+    io.m_axi_acc      <> axiCPU.axi4acc.io.output
+    io.m_axi_perf     <> axiCPU.axi4perf.io.output
+    io.m_axi_mbus     <> axiCPU.axi4mbusCC.io.output
 }
 
 object Veronica_Axi_JTAG_Xilinx_Bscane{
