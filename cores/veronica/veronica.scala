@@ -431,8 +431,8 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     import config._
 
     val io = new Bundle {
-//       val cpu_clk   = in Bool()
-//       val cpu_rst   = in Bool()
+      val cpu_clk   = in Bool()
+      val cpu_rst   = in Bool()
       val aclk      = in Bool()
       val arst      = in Bool()
       val debug_rst = ifGen(jtag_select != jtag_type.none)(out Bool())
@@ -453,7 +453,7 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     }
 
     val resetCtrlClockDomain = ClockDomain(
-      clock = io.aclk,
+      clock = io.cpu_clk,
       config = ClockDomainConfig(
         resetKind = BOOT,
         clockEdge = RISING
@@ -471,8 +471,7 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         systemResetUnbuffered := True
       }
 
-//       when(BufferCC(io.cpu_rst)){
-      when(BufferCC(io.arst)){
+      when(BufferCC(io.cpu_rst)){
         systemResetCounter := 0
       }
 
@@ -482,8 +481,7 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     }
 
     val cpuClockDomain = ClockDomain(
-      clock = io.aclk,
-//       clock = io.cpu_clk,
+      clock = io.cpu_clk,
       reset = resetCtrl.arst,
       config = ClockDomainConfig(
         clockEdge        = RISING,
@@ -502,19 +500,9 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       )
     )
     
-//     val busClockDomain = ClockDomain(
-//       clock = io.aclk,
-//       reset = io.arst,
-//       config = ClockDomainConfig(
-//         clockEdge        = RISING,
-//         resetKind        = spinal.core.SYNC,
-//         resetActiveLevel = HIGH
-//       )
-//     )
-
-    val debugClockDomain = ClockDomain(
+    val busClockDomain = ClockDomain(
       clock = io.aclk,
-      reset = resetCtrl.srst,
+      reset = io.arst,
       config = ClockDomainConfig(
         clockEdge        = RISING,
         resetKind        = spinal.core.SYNC,
@@ -522,7 +510,20 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       )
     )
 
-    val axiCPU = new ClockingArea(cpuClockDomain) {
+    val debugClockDomain = ClockDomain(
+      clock = io.cpu_clk,
+      reset = resetCtrl.srst,
+      config = ClockDomainConfig(
+        clockEdge        = RISING,
+        resetKind        = spinal.core.SYNC,
+        resetActiveLevel = HIGH
+      )
+    )
+    
+    val axiBUS = new ClockingArea(busClockDomain) {
+      val axi4acc  = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
+      val axi4perf = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
+      
       val ram = Axi4SharedOnChipRam(
         dataWidth = configBUS.getAxi4Config().dataWidth,
         byteCount = config.ram_size,
@@ -537,25 +538,14 @@ case class Veronica (val config: VeronicaConfig) extends Component {
 //         arwStage  = true,
 //         config.rom_name
 //       )
- 
-      val axi4acc  = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
-      val axi4perf = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
+    }
+    
+    val axi4perfCC = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32)
+    val axi4accCC  = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32)
+    val axi4ramCC  = Axi4SharedCC(axiBUS.ram.axiConfig, cpuClockDomain, busClockDomain, 32, 32, 32, 32)
+    val axi4mbusCC = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, ddrClockDomain, 32, 32, 32, 32, 32)
 
-//       Should be fairly easy, just add this inbetween and change names
-//       val axi4accCC    = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32, 32)
-//       val axi4perfCC   = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32, 32)
-
-//       Harder, the below will need to have a new clocking area created and then moved to it before the CC can be used.
-//       val axi4ramCC    = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32, 32)
-//       val axi4romCC    = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32, 32)
-//       val axi4clintCC  = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32, 32)
-//       val axi4plicCC   = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32, 32)
-      
-      val axi4mbusCC = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, ddrClockDomain, 32, 32, 32, 32, 32)
-
-      var clintCtrl : Axi4Clint = null
-      var plicCtrl  : Axi4Plic  = null
-
+    val axiCPU = new ClockingArea(cpuClockDomain) {
       val core = new Area{
 
         var cpuConfig : VexRiscvConfig = null
@@ -571,9 +561,9 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         var iBus : Axi4ReadOnly = null
         var dBus : Axi4Shared = null
 
-        clintCtrl = new Axi4Clint(1)
+        val clint = new Axi4Clint(1)
 
-        plicCtrl = new Axi4Plic(sourceCount = 127, targetCount = 2)
+        val plic = new Axi4Plic(sourceCount = 127, targetCount = 2)
 
         for (plugin <- cpu.plugins) plugin match {
           case plugin: IBusCachedPlugin => {
@@ -598,12 +588,12 @@ case class Veronica (val config: VeronicaConfig) extends Component {
             }
           }
           case plugin : CsrPlugin => {
-            plugin.timerInterrupt     := clintCtrl.io.timerInterrupt(0)
-            plugin.softwareInterrupt  := clintCtrl.io.softwareInterrupt(0)
-            plugin.externalInterrupt  := plicCtrl.io.targets(0)
-            plugin.externalInterruptS := plicCtrl.io.targets(1)
-            plugin.utime              := clintCtrl.io.time
-            plicCtrl.io.sources       := io.irq >> 1
+            plugin.timerInterrupt     := clint.io.timerInterrupt(0)
+            plugin.softwareInterrupt  := clint.io.softwareInterrupt(0)
+            plugin.externalInterrupt  := plic.io.targets(0)
+            plugin.externalInterruptS := plic.io.targets(1)
+            plugin.utime              := clint.io.time
+            plic.io.sources       := io.irq >> 1
           }
           case _ =>
         }
@@ -612,28 +602,27 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       val axiCrossbar = Axi4CrossbarFactory()
 
 //       rom.io.axi          -> (0x20000000L,   config.rom_size)
-//       apbBridge.io.axi    -> (0x00000000L,   256 MB)
       axiCrossbar.addSlaves(
-        axi4acc.io.input          -> (0x70000000L,   256 MB),
-        axi4perf.io.input         -> (0x40000000L,   256 MB),
+        axi4accCC.io.input        -> (0x70000000L,   256 MB),
+        axi4perfCC.io.input       -> (0x40000000L,   256 MB),
         axi4mbusCC.io.input       -> (0x90000000L,   config.ddr_size),
-        clintCtrl.io.bus          -> (0x02000000,     64 kB),
-        plicCtrl.io.bus           -> (0x0C000000,      4 MB),
-        ram.io.axi                -> (0x80000000L,   config.ram_size)
+        core.clint.io.bus         -> (0x02000000,     64 kB),
+        core.plic.io.bus          -> (0x0C000000,      4 MB),
+        axi4ramCC.io.input        -> (0x80000000L,   config.ram_size)
       )
 
 //       rom.io.axi
       axiCrossbar.addConnections(
-        core.iBus -> List(ram.io.axi, axi4mbusCC.io.input),
-        core.dBus -> List(ram.io.axi, axi4mbusCC.io.input, clintCtrl.io.bus, plicCtrl.io.bus, axi4acc.io.input, axi4perf.io.input) //apbBridge.io.axi,
+        core.iBus -> List(axi4ramCC.io.input, axi4mbusCC.io.input),
+        core.dBus -> List(axi4ramCC.io.input, axi4mbusCC.io.input, core.clint.io.bus, core.plic.io.bus, axi4accCC.io.input, axi4perfCC.io.input) //apbBridge.io.axi,
       )
 
-      axiCrossbar.addPipelining(ram.io.axi)((crossbar,ctrl) => {
-        crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
-        crossbar.writeData            >/-> ctrl.writeData
-        crossbar.writeRsp              <<  ctrl.writeRsp
-        crossbar.readRsp               <<  ctrl.readRsp
-      })
+//       axiCrossbar.addPipelining(ram.io.axi)((crossbar,ctrl) => {
+//         crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
+//         crossbar.writeData            >/-> ctrl.writeData
+//         crossbar.writeRsp              <<  ctrl.writeRsp
+//         crossbar.readRsp               <<  ctrl.readRsp
+//       })
 
       axiCrossbar.addPipelining(core.dBus)((cpu,crossbar) => {
         cpu.sharedCmd             >>  crossbar.sharedCmd
@@ -651,9 +640,14 @@ case class Veronica (val config: VeronicaConfig) extends Component {
 
     Axi4SpecRenamer(master(io.m_axi_mbus) .setName("m_axi_mbus"))
     
-    io.m_axi_acc      <> axiCPU.axi4acc.io.output
-    io.m_axi_perf     <> axiCPU.axi4perf.io.output
-    io.m_axi_mbus     <> axiCPU.axi4mbusCC.io.output
+    axiBUS.ram.io.axi        <> axi4ramCC.io.output
+    
+    axiBUS.axi4acc.io.input  <> axi4accCC.io.output
+    axiBUS.axi4perf.io.input <> axi4perfCC.io.output
+    
+    io.m_axi_acc      <> axiBUS.axi4acc.io.output
+    io.m_axi_perf     <> axiBUS.axi4perf.io.output
+    io.m_axi_mbus     <> axi4mbusCC.io.output
 }
 
 object Veronica_Axi_JTAG_Xilinx_Bscane{
