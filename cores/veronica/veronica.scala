@@ -520,6 +520,10 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       )
     )
     
+    val axiDDR = new ClockingArea(ddrClockDomain) {
+      val axi4mbus = Axi4SharedToAxi4(configBUS.getAxi4Config())
+    }
+    
     val axiBUS = new ClockingArea(busClockDomain) {
       val axi4acc  = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
       val axi4perf = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
@@ -543,9 +547,12 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     val axi4perfCC = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32)
     val axi4accCC  = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 32, 32, 32, 32)
     val axi4ramCC  = Axi4SharedCC(axiBUS.ram.axiConfig, cpuClockDomain, busClockDomain, 32, 32, 32, 32)
-    val axi4mbusCC = Axi4CC(configBUS.getAxi4Config(), cpuClockDomain, ddrClockDomain, 32, 32, 32, 32, 32)
+    val axi4mbusCC = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, ddrClockDomain, 32, 32, 32, 32)
 
     val axiCPU = new ClockingArea(cpuClockDomain) {
+      val axi4clint = Axi4SharedToAxi4(configBUS.getAxi4Config())
+      val axi4plic  = Axi4SharedToAxi4(configBUS.getAxi4Config())
+      
       val core = new Area{
 
         var cpuConfig : VexRiscvConfig = null
@@ -593,7 +600,7 @@ case class Veronica (val config: VeronicaConfig) extends Component {
             plugin.externalInterrupt  := plic.io.targets(0)
             plugin.externalInterruptS := plic.io.targets(1)
             plugin.utime              := clint.io.time
-            plic.io.sources       := io.irq >> 1
+            plic.io.sources           := io.irq >> 1
           }
           case _ =>
         }
@@ -606,23 +613,30 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         axi4accCC.io.input        -> (0x70000000L,   256 MB),
         axi4perfCC.io.input       -> (0x40000000L,   256 MB),
         axi4mbusCC.io.input       -> (0x90000000L,   config.ddr_size),
-        core.clint.io.bus         -> (0x02000000,     64 kB),
-        core.plic.io.bus          -> (0x0C000000,      4 MB),
+        axi4clint.io.input        -> (0x02000000,     64 kB),
+        axi4plic.io.input         -> (0x0C000000,      4 MB),
         axi4ramCC.io.input        -> (0x80000000L,   config.ram_size)
       )
 
 //       rom.io.axi
       axiCrossbar.addConnections(
         core.iBus -> List(axi4ramCC.io.input, axi4mbusCC.io.input),
-        core.dBus -> List(axi4ramCC.io.input, axi4mbusCC.io.input, core.clint.io.bus, core.plic.io.bus, axi4accCC.io.input, axi4perfCC.io.input) //apbBridge.io.axi,
+        core.dBus -> List(axi4ramCC.io.input, axi4mbusCC.io.input, axi4clint.io.input, axi4plic.io.input, axi4accCC.io.input, axi4perfCC.io.input) //apbBridge.io.axi,
       )
 
-//       axiCrossbar.addPipelining(ram.io.axi)((crossbar,ctrl) => {
-//         crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
-//         crossbar.writeData            >/-> ctrl.writeData
-//         crossbar.writeRsp              <<  ctrl.writeRsp
-//         crossbar.readRsp               <<  ctrl.readRsp
-//       })
+      axiCrossbar.addPipelining(axi4clint.io.input)((crossbar,ctrl) => {
+        crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
+        crossbar.writeData            >/-> ctrl.writeData
+        crossbar.writeRsp              <<  ctrl.writeRsp
+        crossbar.readRsp               <<  ctrl.readRsp
+      })
+      
+      axiCrossbar.addPipelining(axi4plic.io.input)((crossbar,ctrl) => {
+        crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
+        crossbar.writeData            >/-> ctrl.writeData
+        crossbar.writeRsp              <<  ctrl.writeRsp
+        crossbar.readRsp               <<  ctrl.readRsp
+      })
 
       axiCrossbar.addPipelining(core.dBus)((cpu,crossbar) => {
         cpu.sharedCmd             >>  crossbar.sharedCmd
@@ -632,6 +646,9 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       })
 
       axiCrossbar.build()
+      
+      core.clint.io.bus <> axi4clint.io.output
+      core.plic.io.bus  <> axi4plic.io.output
 
     }
 
@@ -645,9 +662,11 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     axiBUS.axi4acc.io.input  <> axi4accCC.io.output
     axiBUS.axi4perf.io.input <> axi4perfCC.io.output
     
+    axiDDR.axi4mbus.io.input <> axi4mbusCC.io.output
+    
     io.m_axi_acc      <> axiBUS.axi4acc.io.output
     io.m_axi_perf     <> axiBUS.axi4perf.io.output
-    io.m_axi_mbus     <> axi4mbusCC.io.output
+    io.m_axi_mbus     <> axiDDR.axi4mbus.io.output
 }
 
 object Veronica_Axi_JTAG_Xilinx_Bscane{
