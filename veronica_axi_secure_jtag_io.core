@@ -7,12 +7,12 @@ filesets:
       - cores/veronica/Veronica.v
     file_type : verilogSource
 
-  #bin:
-    #files:
-      #- cores/veronica/Veronica.v_toplevel_axi_vram_ram_symbol0.bin : { file_type : user, copyto : . }
-      #- cores/veronica/Veronica.v_toplevel_axi_vram_ram_symbol1.bin : { file_type : user, copyto : . }
-      #- cores/veronica/Veronica.v_toplevel_axi_vram_ram_symbol2.bin : { file_type : user, copyto : . }
-      #- cores/veronica/Veronica.v_toplevel_axi_vram_ram_symbol3.bin : { file_type : user, copyto : . }
+  bin:
+    files:
+      - cores/veronica/Veronica.v_toplevel_axiBUS_rom_ram_symbol0.bin : { file_type : mem }
+      - cores/veronica/Veronica.v_toplevel_axiBUS_rom_ram_symbol1.bin : { file_type : mem }
+      - cores/veronica/Veronica.v_toplevel_axiBUS_rom_ram_symbol2.bin : { file_type : mem }
+      - cores/veronica/Veronica.v_toplevel_axiBUS_rom_ram_symbol3.bin : { file_type : mem }
 
   dep:
     depend:
@@ -29,5 +29,5 @@ generate:
 
 targets:
   default:
-    filesets: [rtl, dep]
+    filesets: [rtl, bin, dep]
     generate: [gen_spinalHDL]
