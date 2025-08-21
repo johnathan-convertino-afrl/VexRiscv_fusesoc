@@ -213,7 +213,7 @@ object jtag_type {
 
 case class VeronicaConfig(  jtag_select : jtag_type,
                             ddr_size    : BigInt = 1 GB,
-                            ram_size    : BigInt = 8 kB,
+                            ram_size    : BigInt = 32 kB,
                             rom_size    : BigInt = 8 kB,
                             rom_name    : String = "rom/zebbs.bin",
                             cpuPlugins  : ArrayBuffer[Plugin[VexRiscv]])
@@ -510,6 +510,14 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     val axi4plicCC  = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
     
     val axiCPU = new ClockingArea(cpuClockDomain) {
+    
+      val itim = Axi4SharedOnChipRam(
+        dataWidth = configBUS.getAxi4Config().dataWidth,
+        byteCount = 1 kB,
+        idWidth   = configBUS.getAxi4Config().idWidth,
+        arwStage  = true
+      )
+      
       val core = new Area{
 
         var cpuConfig : VexRiscvConfig = null
@@ -566,12 +574,13 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         axi4mbusCC.io.input       -> (0x80000000L,   config.ddr_size),
         axi4clintCC.io.input      -> (0x02000000L,    64 kB),
         axi4plicCC.io.input       -> (0x0C000000L,     4 MB),
+        itim.io.axi               -> (0x00800000L,     1 kB),
         axi4ramCC.io.input        -> (0x08000000L,   config.ram_size),
         axi4romCC.io.input        -> (0x20010000L,   config.rom_size)
       )
 
       axiCrossbar.addConnections(
-        core.iBus -> List(axi4ramCC.io.input, axi4romCC.io.input, axi4mbusCC.io.input),
+        core.iBus -> List(axi4ramCC.io.input, axi4romCC.io.input, axi4mbusCC.io.input, itim.io.axi),
         core.dBus -> List(axi4ramCC.io.input, axi4romCC.io.input, axi4mbusCC.io.input, axi4clintCC.io.input, axi4plicCC.io.input, axi4accCC.io.input, axi4perfCC.io.input)
       )
 
