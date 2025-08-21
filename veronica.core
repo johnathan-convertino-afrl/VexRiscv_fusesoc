@@ -1,19 +1,19 @@
 CAPI=2:
-name : spinalhdl:cpu:veronica_axi_linux_jtag_xilinx_bscane:1.0.0
+name : spinalhdl:cpu:veronica:1.0.0
 
 filesets:
   rtl:
     files:
       - cores/veronica/Veronica.v
     file_type : verilogSource
-    
+
   bin:
     files:
       - cores/veronica/Veronica.v_toplevel_axiBUS_rom_ram_symbol0.bin : { file_type : mem }
       - cores/veronica/Veronica.v_toplevel_axiBUS_rom_ram_symbol1.bin : { file_type : mem }
       - cores/veronica/Veronica.v_toplevel_axiBUS_rom_ram_symbol2.bin : { file_type : mem }
       - cores/veronica/Veronica.v_toplevel_axiBUS_rom_ram_symbol3.bin : { file_type : mem }
-      
+
   dep:
     depend:
       - spinalhdl:repo:spinalhdl:1.10.1
@@ -25,7 +25,7 @@ generate:
     generator: spinalhdl
     parameters:
       src_dir: cores/veronica
-      build_args: ["runMain", "vexriscv.afrl.Veronica_Axi_Linux_JTAG_Xilinx_Bscane"]
+      build_args: ["runMain", "vexriscv.afrl.Veronica"]
 
 targets:
   default:

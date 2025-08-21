@@ -60,7 +60,7 @@ object configBUS {
   )
   
   def getAxi4RamConfig(dataWidth : Int, byteCount : BigInt,idWidth : Int) = Axi4Config(
-    addressWidth = log2Up(byteCount/(dataWidth/8)),
+    addressWidth = log2Up(byteCount),
     dataWidth = dataWidth,
     idWidth = idWidth,
     useLock = false,
@@ -225,7 +225,7 @@ object VeronicaConfig{
       jtag_select = jtag_type.io,
       cpuPlugins = ArrayBuffer(
         new IBusCachedPlugin(
-          resetVector = 0x80000000l,
+          resetVector = 0x20010000l,
           prediction = STATIC,
           compressedGen = true,
           relaxedPcCalculation = true,
@@ -292,7 +292,7 @@ object VeronicaConfig{
         new CsrPlugin(
           CsrPluginConfig.openSbi(
             mhartid = 0,
-            misa = Riscv.misaToInt(s"imac")).copy(mtvecInit = 0x80000020l, xtvecModeGen = true, utimeAccess = CsrAccess.READ_ONLY)
+            misa = Riscv.misaToInt(s"imac")).copy(mtvecInit = 0x20010020l, xtvecModeGen = true, utimeAccess = CsrAccess.READ_ONLY)
         ),
         new YamlPlugin("veronica_cpu0.yaml")
       )
@@ -318,7 +318,7 @@ object VeronicaConfig{
     //Change original ibus with mmu ibus
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[IBusCachedPlugin])) =
       new IBusCachedPlugin(
-        resetVector = 0x80000000l,
+        resetVector = 0x20010000l,
         prediction = STATIC,
         compressedGen = true,
         relaxedPcCalculation = true,
@@ -609,55 +609,55 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     io.m_axi_mbus     <> axiDDR.axi4mbus.io.output
 }
 
-object Veronica_Axi_JTAG_Xilinx_Bscane{
+object Veronica_JTAG_Xilinx_Bscane{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Veronica(VeronicaConfig.default.copy(jtag_select = jtag_type.xilinx_bscane)))
   }
 }
 
-object Veronica_Axi_JTAG_IO{
+object Veronica_JTAG_IO{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Veronica(VeronicaConfig.default))
   }
 }
 
-object Veronica_Axi{
+object Veronica{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Veronica(VeronicaConfig.default.copy(jtag_select = jtag_type.none)))
   }
 }
 
-object Veronica_Axi_Secure_JTAG_Xilinx_Bscane{
+object Veronica_Secure_JTAG_Xilinx_Bscane{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Veronica(VeronicaConfig.secure.copy(jtag_select = jtag_type.xilinx_bscane)))
   }
 }
 
-object Veronica_Axi_Secure_JTAG_IO{
+object Veronica_Secure_JTAG_IO{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Veronica(VeronicaConfig.secure))
   }
 }
 
-object Veronica_Axi_Secure{
+object Veronica_Secure{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Veronica(VeronicaConfig.secure.copy(jtag_select = jtag_type.none)))
   }
 }
 
-object Veronica_Axi_Linux_JTAG_Xilinx_Bscane{
+object Veronica_Linux_JTAG_Xilinx_Bscane{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Veronica(VeronicaConfig.linux.copy(jtag_select = jtag_type.xilinx_bscane)))
   }
 }
 
-object Veronica_Axi_Linux_JTAG_IO{
+object Veronica_Linux_JTAG_IO{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Veronica(VeronicaConfig.linux))
   }
 }
 
-object Veronica_Axi_Linux{
+object Veronica_Linux{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Veronica(VeronicaConfig.linux.copy(jtag_select = jtag_type.none)))
   }

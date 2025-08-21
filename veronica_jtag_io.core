@@ -1,5 +1,5 @@
 CAPI=2:
-name : spinalhdl:cpu:veronica_axi_secure_jtag_io:1.0.0
+name : spinalhdl:cpu:veronica_jtag_io:1.0.0
 
 filesets:
   rtl:
@@ -25,7 +25,7 @@ generate:
     generator: spinalhdl
     parameters:
       src_dir: cores/veronica
-      build_args: ["runMain", "vexriscv.afrl.Veronica_Axi_Secure_JTAG_IO"]
+      build_args: ["runMain", "vexriscv.afrl.Veronica_JTAG_IO"]
 
 targets:
   default:
