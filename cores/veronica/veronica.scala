@@ -311,7 +311,7 @@ object VeronicaConfig{
         new CsrPlugin(
           CsrPluginConfig.openSbi(
             mhartid = 0,
-            misa = Riscv.misaToInt(s"imac")).copy(mtvecInit = 0x20010020l, xtvecModeGen = true, utimeAccess = CsrAccess.READ_ONLY)
+            misa = Riscv.misaToInt(s"imacsu")).copy(mtvecInit = 0x20010020l, xtvecModeGen = true, utimeAccess = CsrAccess.READ_ONLY)
         ),
         new YamlPlugin("veronica_cpu0.yaml")
       )
