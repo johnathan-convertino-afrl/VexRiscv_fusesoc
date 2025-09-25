@@ -16,9 +16,10 @@ import spinal.lib.bus.wishbone._
 import spinal.lib.io.TriStateArray
 import spinal.lib.cpu.riscv.RiscvHart
 import spinal.lib.misc.Apb3Clint
+import spinal.lib.{Flow, master}
 import vexriscv.ip.{DataCacheConfig, InstructionCacheConfig}
 import vexriscv.plugin._
-import vexriscv.{Riscv, VexRiscv, VexRiscvConfig, plugin}
+import vexriscv.{DecoderService, Stageable, Riscv, VexRiscv, VexRiscvConfig, plugin}
 import vexriscv.ip.fpu.FpuParameter
 
 import scala.collection.mutable.ArrayBuffer
@@ -211,6 +212,23 @@ object jtag_type {
   case object none          extends jtag_type
 }
 
+class CsrMstatush extends Plugin[VexRiscv]{
+  override def build(pipeline: VexRiscv): Unit = {
+    import pipeline._
+    import pipeline.config._
+
+    pipeline plug new Area{
+      val zero_reg = Reg(UInt(32 bits)) init(0)
+      
+      val csrService = pipeline.service(classOf[CsrInterface])
+      csrService.r(0x310, zero_reg)
+      csrService.onWrite(0x310){
+        zero_reg := 0
+      }
+    }
+  }
+}
+
 case class VeronicaConfig(  jtag_select : jtag_type,
                             ddr_size    : BigInt = 1 GB,
                             ram_size    : BigInt = 8 kB,
@@ -289,6 +307,7 @@ object VeronicaConfig{
         new StaticMemoryTranslatorPlugin(
           ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 28) === 0x0)
         ),
+        new CsrMstatush,
         new CsrPlugin(
           CsrPluginConfig.openSbi(
             mhartid = 0,
