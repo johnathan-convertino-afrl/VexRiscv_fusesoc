@@ -231,8 +231,8 @@ class CsrMstatush extends Plugin[VexRiscv]{
 
 case class VeronicaConfig(  jtag_select : jtag_type,
                             ddr_size    : BigInt = 1 GB,
-                            ram_size    : BigInt = 8 kB,
-                            rom_size    : BigInt = 8 kB,
+                            ram_size    : BigInt = 16 kB,
+                            rom_size    : BigInt = 16 kB,
                             rom_name    : String = "rom/zebbs.bin",
                             cpuPlugins  : ArrayBuffer[Plugin[VexRiscv]])
 
