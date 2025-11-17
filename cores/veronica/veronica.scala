@@ -8,6 +8,8 @@ import spinal.lib.bus.amba3.apb._
 import spinal.lib.misc.HexTools
 import spinal.lib.misc._
 import spinal.lib.misc.plic._
+import spinal.lib.misc.AxiLite4Clint
+import spinal.lib.misc.plic.AxiLite4Plic
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.bus.amba4.axilite._
 import spinal.lib.com.jtag.{Jtag, JtagTapInstructionCtrl}
@@ -97,58 +99,6 @@ case class Axi4SharedToAxi4(axiConfig : Axi4Config) extends Component{
   }
 
   io.output <> io.input.toAxi4()
-}
-
-case class AxiLite4Clint(hartCount : Int, bufferTime : Boolean = false) extends Component{
-  val io = new Bundle {
-    val bus = slave(AxiLite4(configBUS.getAxiLite4Config()))
-    val timerInterrupt = out Bits(hartCount bits)
-    val softwareInterrupt = out Bits(hartCount bits)
-    val time = out UInt(64 bits)
-  }
-
-  val factory = new AxiLite4SlaveFactory(io.bus)
-  val logic = Clint(0 until hartCount)
-  logic.driveFrom(factory, bufferTime)
-
-  for(hartId <- 0 until hartCount){
-    io.timerInterrupt(hartId) := logic.harts(hartId).timerInterrupt
-    io.softwareInterrupt(hartId) := logic.harts(hartId).softwareInterrupt
-  }
-
-  io.time := logic.time
-}
-
-class AxiLite4Plic(sourceCount : Int, targetCount : Int) extends Component{
-  val priorityWidth = 2
-  val plicMapping = PlicMapping.sifive
-  import plicMapping._
-
-  val io = new Bundle {
-    val bus = slave(AxiLite4(configBUS.getAxiLite4Config()))
-    val sources = in Bits (sourceCount bits)
-    val targets = out Bits (targetCount bits)
-  }
-
-  val gateways = (for ((source, id) <- (io.sources.asBools, 1 to sourceCount).zipped) yield PlicGatewayActiveHigh(
-    source = source,
-    id = id,
-    priorityWidth = priorityWidth
-  )).toSeq
-
-  val targets = for (i <- 0 until targetCount) yield PlicTarget(
-    id = i,
-    gateways = gateways,
-    priorityWidth = priorityWidth
-  )
-
-  io.targets := targets.map(_.iep).asBits
-
-  val bus = new AxiLite4SlaveFactory(io.bus)
-  val mapping = PlicMapper(bus, plicMapping)(
-    gateways = gateways,
-    targets = targets
-  )
 }
 
 case class Axi4SharedOnChipInitRam(onChipRamBinFile : String, dataWidth : Int, byteCount : BigInt, idWidth : Int, arwStage : Boolean = false) extends Component{
@@ -309,9 +259,14 @@ object VeronicaConfig{
         ),
         new CsrMstatush,
         new CsrPlugin(
-          CsrPluginConfig.openSbi(
-            mhartid = 0,
-            misa = Riscv.misaToInt(s"imacsu")).copy(mtvecInit = 0x20010020l, xtvecModeGen = true, utimeAccess = CsrAccess.READ_ONLY)
+          CsrPluginConfig.linuxFull(0x20010020l).copy(misaExtensionsInit = Riscv.misaToInt(s"imacsu"),
+                                                      mvendorid = 0,
+                                                      marchid = 0,
+                                                      mimpid = 0,
+                                                      xtvecModeGen = true,
+                                                      ebreakGen = true,
+                                                      utimeAccess = CsrAccess.READ_ONLY
+                                                      )
         ),
         new YamlPlugin("veronica_cpu0.yaml")
       )
@@ -501,8 +456,8 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       val axi4acc  = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
       val axi4perf = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
       
-      val axi4clint = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
-      val axi4plic  = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
+      val axi4clint = Axi4SharedToAxiLite4(configBUS.getAxi4Config().copy(addressWidth = 16))
+      val axi4plic  = Axi4SharedToAxiLite4(configBUS.getAxi4Config().copy(addressWidth = 22))
       
       val rom = Axi4SharedOnChipInitRam(
         onChipRamBinFile = config.rom_name,
@@ -525,8 +480,8 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     val axi4ramCC   = Axi4SharedCC(axiBUS.ram.axiConfig, cpuClockDomain, busClockDomain, 8, 8, 8, 8)
     val axi4romCC   = Axi4SharedCC(axiBUS.rom.axiConfig, cpuClockDomain, busClockDomain, 8, 8, 8, 8)
     val axi4mbusCC  = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, ddrClockDomain, 8, 8, 8, 8)
-    val axi4clintCC = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
-    val axi4plicCC  = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
+    val axi4clintCC = Axi4SharedCC(configBUS.getAxi4Config().copy(addressWidth = 16), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
+    val axi4plicCC  = Axi4SharedCC(configBUS.getAxi4Config().copy(addressWidth = 22), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
     
     val axiCPU = new ClockingArea(cpuClockDomain) {
     
