@@ -19,6 +19,9 @@ import spinal.lib.io.TriStateArray
 import spinal.lib.cpu.riscv.RiscvHart
 import spinal.lib.misc.Apb3Clint
 import spinal.lib.{Flow, master}
+import spinal.lib.com.usb.ohci._
+import spinal.lib.com.usb.phy.UsbHubLsFs.CtrlCc
+import spinal.lib.com.usb.phy._
 import vexriscv.ip.{DataCacheConfig, InstructionCacheConfig}
 import vexriscv.plugin._
 import vexriscv.{DecoderService, Stageable, Riscv, VexRiscv, VexRiscvConfig, plugin}
@@ -92,13 +95,22 @@ case class Axi4SharedToAxiLite4(axiConfig : Axi4Config) extends Component{
 }
 
 //axi connection
-case class Axi4SharedToAxi4(axiConfig : Axi4Config) extends Component{
+case class Axi4SharedToAxi4V(axiConfig : Axi4Config) extends Component{
   val io = new Bundle {
     val input  = slave(Axi4Shared(axiConfig))
     val output = master(Axi4(axiConfig))
   }
 
   io.output <> io.input.toAxi4()
+}
+
+case class Axi4ToAxi4SharedV(axiConfig : Axi4Config) extends Component{
+  val io = new Bundle {
+    val input  = slave(Axi4(axiConfig))
+    val output = master(Axi4Shared(axiConfig))
+  }
+
+  io.output <> io.input.toShared()
 }
 
 case class Axi4SharedOnChipInitRam(onChipRamBinFile : String, dataWidth : Int, byteCount : BigInt, idWidth : Int, arwStage : Boolean = false) extends Component{
@@ -352,6 +364,15 @@ object VeronicaConfig{
 case class Veronica (val config: VeronicaConfig) extends Component {
 
     import config._
+    
+    val usb_p = UsbOhciParameter(
+      noPowerSwitching = true,
+      powerSwitchingMode = true,
+      noOverCurrentProtection = true,
+      powerOnToPowerGoodTime = 10,
+      dataWidth = configBUS.getAxi4Config().dataWidth,
+      portsConfig = List.fill(1)(OhciPortParameter())
+    )
 
     val io = new Bundle {
       val cpu_clk   = in Bool()
@@ -360,12 +381,15 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       val arst      = in Bool()
       val debug_rst = ifGen(jtag_select != jtag_type.none)(out Bool())
 
+      val usb_phy_clk   = in Bool()
+      val usb_phy_rst   = in Bool()
+      
       val ddr_clk   = in Bool()
       val ddr_rst   = in Bool()
 
       val jtag      = ifGen(jtag_select == jtag_type.io)(slave(Jtag()))
 
-      val irq       = in Bits(128 bits)
+      val irq       = in Bits(127 bits)
 
       //System Port for memory (IBUS/DBUS)
       val m_axi_mbus = master(Axi4(configBUS.getAxi4Config()))
@@ -373,6 +397,12 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       //Peripheral Ports for devices (DBUS ONLY)
       val m_axi_acc  = master(AxiLite4(configBUS.getAxiLite4Config()))
       val m_axi_perf = master(AxiLite4(configBUS.getAxiLite4Config()))
+      
+      //dma0 port for memory access
+      val s_axi_dma0 = slave(Axi4(configBUS.getAxi4Config().copy(idWidth = 2)))
+      
+      //usb phy
+      val usb = master(UsbPhyFsNativeIo())
     }
 
     val resetCtrlClockDomain = ClockDomain(
@@ -443,15 +473,25 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       )
     )
     
+    val phyClockDomain = ClockDomain(
+      clock = io.usb_phy_clk,
+      reset = io.usb_phy_rst,
+      frequency = FixedFrequency(48 MHz),
+      config = ClockDomainConfig(
+        clockEdge        = RISING,
+        resetKind        = spinal.core.SYNC,
+        resetActiveLevel = HIGH
+      )
+    )
+    
     val axiDDR = new ClockingArea(ddrClockDomain) {
-      val axi4mbus = Axi4SharedToAxi4(configBUS.getAxi4Config())
+      val axi4mbus = Axi4SharedToAxi4V(configBUS.getAxi4Config())
+      val axi4dma0 = Axi4ToAxi4SharedV(configBUS.getAxi4Config().copy(idWidth = 2))
     }
     
     val axiBUS = new ClockingArea(busClockDomain) {
       val clint = new AxiLite4Clint(1)
       val plic = new AxiLite4Plic(sourceCount = 127, targetCount = 2)
-      
-      plic.io.sources  := BufferCC(io.irq >> 1)
       
       val axi4acc  = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
       val axi4perf = Axi4SharedToAxiLite4(configBUS.getAxi4Config())
@@ -473,15 +513,25 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         idWidth   = configBUS.getAxi4Config().idWidth,
         arwStage  = true
       )
+      
+      val usb = UsbOhciAxi4(usb_p, busClockDomain, phyClockDomain)
+      
+      val axi4usb     = Axi4SharedToAxi4V(usb.ctrlParameter)
+      val axi4usbdma  = Axi4ToAxi4SharedV(configBUS.getAxi4Config().copy(idWidth = 0, useBurst = false, useLock = false, useQos = false))
+      
+      plic.io.sources  := BufferCC(B(usb.io.interrupt, io.irq >> 1))
     }
     
     val axi4perfCC  = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
     val axi4accCC   = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
     val axi4ramCC   = Axi4SharedCC(axiBUS.ram.axiConfig, cpuClockDomain, busClockDomain, 8, 8, 8, 8)
+    val axi4usbCC   = Axi4SharedCC(axiBUS.usb.ctrlParameter, cpuClockDomain, busClockDomain, 8, 8, 8, 8)
     val axi4romCC   = Axi4SharedCC(axiBUS.rom.axiConfig, cpuClockDomain, busClockDomain, 8, 8, 8, 8)
     val axi4mbusCC  = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, ddrClockDomain, 8, 8, 8, 8)
     val axi4clintCC = Axi4SharedCC(configBUS.getAxi4Config().copy(addressWidth = 16), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
     val axi4plicCC  = Axi4SharedCC(configBUS.getAxi4Config().copy(addressWidth = 22), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
+    val axi4usbdmaCC = Axi4SharedCC(configBUS.getAxi4Config().copy(idWidth = 0, useBurst = false, useLock = false, useQos = false), busClockDomain, cpuClockDomain, 8, 8, 8, 8)
+    val axi4dma0CC  = Axi4SharedCC(configBUS.getAxi4Config().copy(idWidth = 2), ddrClockDomain, cpuClockDomain, 8, 8, 8, 8)
     
     val axiCPU = new ClockingArea(cpuClockDomain) {
     
@@ -550,12 +600,15 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         axi4plicCC.io.input       -> (0x0C000000L,     4 MB),
         itim.io.axi               -> (0x00800000L,     1 kB),
         axi4ramCC.io.input        -> (0x08000000L,   config.ram_size),
-        axi4romCC.io.input        -> (0x20010000L,   config.rom_size)
+        axi4romCC.io.input        -> (0x20010000L,   config.rom_size),
+        axi4usbCC.io.input        -> (0x07000000L,     4 kB)
       )
 
       axiCrossbar.addConnections(
         core.iBus -> List(axi4ramCC.io.input, axi4romCC.io.input, axi4mbusCC.io.input, itim.io.axi),
-        core.dBus -> List(axi4ramCC.io.input, axi4romCC.io.input, axi4mbusCC.io.input, axi4clintCC.io.input, axi4plicCC.io.input, axi4accCC.io.input, axi4perfCC.io.input)
+        core.dBus -> List(axi4ramCC.io.input, axi4romCC.io.input, axi4mbusCC.io.input, axi4usbCC.io.input, axi4clintCC.io.input, axi4plicCC.io.input, axi4accCC.io.input, axi4perfCC.io.input),
+        axi4dma0CC.io.output -> List(axi4mbusCC.io.input),
+        axi4usbdmaCC.io.output -> List(axi4mbusCC.io.input)
       )
 
       axiCrossbar.addPipelining(core.dBus)((cpu,crossbar) => {
@@ -573,12 +626,18 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     AxiLite4SpecRenamer(master(io.m_axi_perf) .setName("m_axi_perf"))
 
     Axi4SpecRenamer(master(io.m_axi_mbus) .setName("m_axi_mbus"))
+
+    Axi4SpecRenamer(slave(io.s_axi_dma0) .setName("s_axi_dma0"))
     
+    axiBUS.axi4usb.io.input   <> axi4usbCC.io.output
     axiBUS.axi4clint.io.input <> axi4clintCC.io.output
     axiBUS.axi4plic.io.input  <> axi4plicCC.io.output
     
+    axiBUS.usb.io.ctrl    <> axiBUS.axi4usb.io.output
     axiBUS.clint.io.bus   <> axiBUS.axi4clint.io.output
     axiBUS.plic.io.bus    <> axiBUS.axi4plic.io.output
+    axiBUS.axi4usbdma.io.input <> axiBUS.usb.io.dma
+    
     axiBUS.rom.io.axi     <> axi4romCC.io.output
     axiBUS.ram.io.axi     <> axi4ramCC.io.output
     
@@ -587,9 +646,16 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     
     axiDDR.axi4mbus.io.input <> axi4mbusCC.io.output
     
+    axi4dma0CC.io.input <> axiDDR.axi4dma0.io.output
+    
+    axi4usbdmaCC.io.input <> axiBUS.axi4usbdma.io.output
+    
     io.m_axi_acc      <> axiBUS.axi4acc.io.output
     io.m_axi_perf     <> axiBUS.axi4perf.io.output
     io.m_axi_mbus     <> axiDDR.axi4mbus.io.output
+    io.s_axi_dma0     <> axiDDR.axi4dma0.io.input
+    
+    io.usb <> axiBUS.usb.io.usb(0)
 }
 
 object Veronica_JTAG_Xilinx_Bscane{
