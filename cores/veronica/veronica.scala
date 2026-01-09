@@ -607,8 +607,8 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       axiCrossbar.addConnections(
         core.iBus -> List(axi4ramCC.io.input, axi4romCC.io.input, axi4mbusCC.io.input, itim.io.axi),
         core.dBus -> List(axi4ramCC.io.input, axi4romCC.io.input, axi4mbusCC.io.input, axi4usbCC.io.input, axi4clintCC.io.input, axi4plicCC.io.input, axi4accCC.io.input, axi4perfCC.io.input),
-        axi4dma0CC.io.output -> List(axi4mbusCC.io.input),
-        axi4usbdmaCC.io.output -> List(axi4mbusCC.io.input)
+        axi4dma0CC.io.output    -> List(axi4mbusCC.io.input),
+        axi4usbdmaCC.io.output  -> List(axi4mbusCC.io.input)
       )
 
       axiCrossbar.addPipelining(core.dBus)((cpu,crossbar) => {
