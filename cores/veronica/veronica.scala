@@ -484,6 +484,8 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       )
     )
     
+    val axi4busCC  = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
+    
     val axiBUS = new ClockingArea(busClockDomain) {
       val clint = new AxiLite4Clint(1)
       val plic = new AxiLite4Plic(sourceCount = 127, targetCount = 2)
@@ -515,18 +517,34 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       val axi4usbdma  = Axi4ToAxi4SharedV(configBUS.getAxi4Config().copy(idWidth = 0, useBurst = false, useLock = false, useQos = false))
       
       plic.io.sources  := BufferCC(B(usb.io.interrupt, io.irq >> 1))
+      
+      usb.io.ctrl         <> axi4usb.io.output
+      clint.io.bus        <> axi4clint.io.output
+      plic.io.bus         <> axi4plic.io.output
+      axi4usbdma.io.input <> usb.io.dma
+      
+      val axiBusCrossbar = Axi4CrossbarFactory()
+      
+      axiBusCrossbar.addSlaves(
+        axi4acc.io.input    -> (0x70000000L,   256 MB),
+        axi4perf.io.input   -> (0x40000000L,   256 MB),
+        axi4clint.io.input  -> (0x02000000L,    64 kB),
+        axi4plic.io.input   -> (0x0C000000L,     4 MB),
+        ram.io.axi          -> (0x08000000L,   config.ram_size),
+        rom.io.axi          -> (0x20010000L,   config.rom_size),
+        axi4usb.io.input    -> (0x07000000L,     4 kB)
+      )
+      
+      axiBusCrossbar.addConnections(
+        axi4busCC.io.output -> List(axi4acc.io.input, axi4perf.io.input, axi4clint.io.input, axi4plic.io.input, ram.io.axi, rom.io.axi, axi4usb.io.input)
+      )
+      
+      axiBusCrossbar.build()
+
     }
     
-    val axi4perfCC  = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
-    val axi4accCC   = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
-    val axi4ramCC   = Axi4SharedCC(axiBUS.ram.axiConfig, cpuClockDomain, busClockDomain, 8, 8, 8, 8)
-    val axi4usbCC   = Axi4SharedCC(axiBUS.usb.ctrlParameter, cpuClockDomain, busClockDomain, 8, 8, 8, 8)
-    val axi4romCC   = Axi4SharedCC(axiBUS.rom.axiConfig, cpuClockDomain, busClockDomain, 8, 8, 8, 8)
     val axi4mbusCC  = Axi4SharedCC(configBUS.getAxi4Config().copy(idWidth = 2), cpuClockDomain, ddrClockDomain, 8, 8, 8, 8)
-    val axi4clintCC = Axi4SharedCC(configBUS.getAxi4Config().copy(addressWidth = 16), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
-    val axi4plicCC  = Axi4SharedCC(configBUS.getAxi4Config().copy(addressWidth = 22), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
     val axi4usbdmaCC = Axi4SharedCC(configBUS.getAxi4Config().copy(idWidth = 0, useBurst = false, useLock = false, useQos = false), busClockDomain, ddrClockDomain, 8, 8, 8, 8)
-//     val axi4dma0CC  = Axi4SharedCC(configBUS.getAxi4Config().copy(idWidth = 2), ddrClockDomain, cpuClockDomain, 8, 8, 8, 8)
     
     val axiCPU = new ClockingArea(cpuClockDomain) {
     
@@ -588,20 +606,14 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       val axiCpuCrossbar = Axi4CrossbarFactory()
 
       axiCpuCrossbar.addSlaves(
-        axi4accCC.io.input        -> (0x70000000L,   256 MB),
-        axi4perfCC.io.input       -> (0x40000000L,   256 MB),
-        axi4mbusCC.io.input       -> (0x80000000L,   config.ddr_size),
-        axi4clintCC.io.input      -> (0x02000000L,    64 kB),
-        axi4plicCC.io.input       -> (0x0C000000L,     4 MB),
+        axi4busCC.io.input        -> (0x00800400L,  2039 MB),
         itim.io.axi               -> (0x00800000L,     1 kB),
-        axi4ramCC.io.input        -> (0x08000000L,   config.ram_size),
-        axi4romCC.io.input        -> (0x20010000L,   config.rom_size),
-        axi4usbCC.io.input        -> (0x07000000L,     4 kB)
+        axi4mbusCC.io.input       -> (0x80000000L,   config.ddr_size)
       )
 
       axiCpuCrossbar.addConnections(
-        core.iBus -> List(axi4ramCC.io.input, axi4romCC.io.input, axi4mbusCC.io.input, itim.io.axi),
-        core.dBus -> List(axi4ramCC.io.input, axi4romCC.io.input, axi4mbusCC.io.input, axi4usbCC.io.input, axi4clintCC.io.input, axi4plicCC.io.input, axi4accCC.io.input, axi4perfCC.io.input)
+        core.iBus -> List(axi4busCC.io.input, axi4mbusCC.io.input, itim.io.axi),
+        core.dBus -> List(axi4busCC.io.input, axi4mbusCC.io.input)
       )
 
       axiCpuCrossbar.addPipelining(core.dBus)((cpu,crossbar) => {
@@ -612,7 +624,6 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       })
 
       axiCpuCrossbar.build()
-
     }
     
     val axiDDR = new ClockingArea(ddrClockDomain) {
@@ -640,25 +651,6 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     Axi4SpecRenamer(master(io.m_axi_mbus) .setName("m_axi_mbus"))
 
     Axi4SpecRenamer(slave(io.s_axi_dma0) .setName("s_axi_dma0"))
-    
-    axiBUS.axi4usb.io.input   <> axi4usbCC.io.output
-    axiBUS.axi4clint.io.input <> axi4clintCC.io.output
-    axiBUS.axi4plic.io.input  <> axi4plicCC.io.output
-    
-    axiBUS.usb.io.ctrl    <> axiBUS.axi4usb.io.output
-    axiBUS.clint.io.bus   <> axiBUS.axi4clint.io.output
-    axiBUS.plic.io.bus    <> axiBUS.axi4plic.io.output
-    axiBUS.axi4usbdma.io.input <> axiBUS.usb.io.dma
-    
-    axiBUS.rom.io.axi     <> axi4romCC.io.output
-    axiBUS.ram.io.axi     <> axi4ramCC.io.output
-    
-    axiBUS.axi4acc.io.input  <> axi4accCC.io.output
-    axiBUS.axi4perf.io.input <> axi4perfCC.io.output
-    
-//     axiDDR.axi4mbus.io.input <> axi4mbusCC.io.output
-    
-//     axi4dma0CC.io.input <> axiDDR.axi4dma0.io.output
     
     axi4usbdmaCC.io.input <> axiBUS.axi4usbdma.io.output
     
