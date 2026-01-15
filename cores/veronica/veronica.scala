@@ -307,6 +307,7 @@ object VeronicaConfig{
         prediction = STATIC,
         compressedGen = true,
         relaxedPcCalculation = true,
+        injectorStage = true,
         config = InstructionCacheConfig(
           cacheSize = 4096,
           bytePerLine = 32,
@@ -317,8 +318,8 @@ object VeronicaConfig{
           catchIllegalAccess = true,
           catchAccessFault = true,
           asyncTagMemory = true,
-          twoCycleRam = false,
-          twoCycleCache = false
+          twoCycleRam = true,
+          twoCycleCache = true
         ),
         memoryTranslatorPortConfig = MmuPortConfig(
           portTlbSize = 4,
@@ -551,7 +552,7 @@ case class Veronica (val config: VeronicaConfig) extends Component {
         dataWidth = configBUS.getAxi4Config().dataWidth,
         byteCount = 1 kB,
         idWidth   = configBUS.getAxi4Config().idWidth,
-        arwStage  = true
+        arwStage  = false
       )
       
       val core = new Area{
@@ -612,8 +613,15 @@ case class Veronica (val config: VeronicaConfig) extends Component {
 
       axiCpuCrossbar.addConnections(
         core.iBus -> List(axi4busCC.io.input, axi4mbusCC.io.input, itim.io.axi),
-        core.dBus -> List(axi4busCC.io.input, axi4mbusCC.io.input)
+        core.dBus -> List(axi4busCC.io.input, axi4mbusCC.io.input, itim.io.axi)
       )
+      
+      axiCpuCrossbar.addPipelining(itim.io.axi)((crossbar,ctrl) => {
+        crossbar.sharedCmd.halfPipe()  >>  ctrl.sharedCmd
+        crossbar.writeData            >/-> ctrl.writeData
+        crossbar.writeRsp              <<  ctrl.writeRsp
+        crossbar.readRsp               <<  ctrl.readRsp
+      })
 
       axiCpuCrossbar.addPipelining(core.dBus)((cpu,crossbar) => {
         cpu.sharedCmd             >>  crossbar.sharedCmd
