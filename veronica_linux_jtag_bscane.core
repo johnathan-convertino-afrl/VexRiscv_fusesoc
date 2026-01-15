@@ -16,8 +16,8 @@ filesets:
       
   dep:
     depend:
-      - spinalhdl:repo:spinalhdl:1.10.1
-      - spinalhdl:repo:vexriscv:1.10.1
+      - spinalhdl:repo:spinalhdl:1.13.0
+      - spinalhdl:repo:vexriscv:1.13.0
       - AFRL:utility:generators:1.0.0
 
 generate:
@@ -25,6 +25,7 @@ generate:
     generator: spinalhdl
     parameters:
       src_dir: cores/veronica
+      version: 1.12.0
       build_args: ["runMain", "vexriscv.afrl.Veronica_Linux_JTAG_Xilinx_Bscane"]
 
 targets:

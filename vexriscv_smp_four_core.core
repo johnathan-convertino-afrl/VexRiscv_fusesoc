@@ -9,15 +9,16 @@ filesets:
 
   dep:
     depend:
-      - spinalhdl:repo:spinalhdl:1.10.1
-      - spinalhdl:repo:vexriscv:1.10.1
+      - spinalhdl:repo:spinalhdl:1.13.0
+      - spinalhdl:repo:vexriscv:1.13.0
       - AFRL:utility:generators:1.0.0
 
 generate:
   gen_spinalHDL:
     generator: spinalhdl
     parameters:
-      src_dir: VexRiscv
+      src_dir: cores/veronica
+      version: 1.12.0
       build_args: ["runMain", "vexriscv.demo.smp.VexRiscvLitexSmpClusterCmdGen", "--coherent-dma", "--cpu-count=4", "--ibus-width=64", "--dbus-width=64", "--dcache-size=8192", "--icache-size=8192", "--dcache-ways=2", "--icache-ways=2", "--litedram-width=128", "--aes-instruction=False", "--expose-time=False", "--out-of-order-decoder=True", "--privileged-debug=False", "--hardware-breakpoints=0", "--wishbone-memory=False", "--fpu=False", "--cpu-per-fpu=4", "--rvc=False", "--netlist-name=VexRiscvLitexSmpCluster", "--netlist-directory=verilog", "--dtlb-size=4", "--itlb-size=4"]
 
 targets:

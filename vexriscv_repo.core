@@ -1,5 +1,5 @@
 CAPI=2:
-name : spinalhdl:repo:vexriscv:1.10.1
+name : spinalhdl:repo:vexriscv:1.13.0
 
 filesets:
   dep:
@@ -12,7 +12,7 @@ generate:
     parameters:
       repo_url: https://github.com/SpinalHDL/VexRiscv.git
       repo_dir: VexRiscv
-      tag: fe5e6dd
+      tag: 2130484fe93c04edc0f17a4991108fdef9db89b3
 
 targets:
   default:

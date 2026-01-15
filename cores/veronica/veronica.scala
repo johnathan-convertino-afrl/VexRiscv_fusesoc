@@ -174,22 +174,22 @@ object jtag_type {
   case object none          extends jtag_type
 }
 
-class CsrMstatush extends Plugin[VexRiscv]{
-  override def build(pipeline: VexRiscv): Unit = {
-    import pipeline._
-    import pipeline.config._
-
-    pipeline plug new Area{
-      val zero_reg = Reg(UInt(32 bits)) init(0)
-      
-      val csrService = pipeline.service(classOf[CsrInterface])
-      csrService.r(0x310, zero_reg)
-      csrService.onWrite(0x310){
-        zero_reg := 0
-      }
-    }
-  }
-}
+// class CsrMstatush extends Plugin[VexRiscv]{
+//   override def build(pipeline: VexRiscv): Unit = {
+//     import pipeline._
+//     import pipeline.config._
+// 
+//     pipeline plug new Area{
+//       val zero_reg = Reg(UInt(32 bits)) init(0)
+//       
+//       val csrService = pipeline.service(classOf[CsrInterface])
+//       csrService.r(0x310, zero_reg)
+//       csrService.onWrite(0x310){
+//         zero_reg := 0
+//       }
+//     }
+//   }
+// }
 
 case class VeronicaConfig(  jtag_select : jtag_type,
                             ddr_size    : BigInt = 1 GB,
@@ -267,9 +267,8 @@ object VeronicaConfig{
           catchAddressMisaligned = true
         ),
         new StaticMemoryTranslatorPlugin(
-          ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 28) === 0x0)
-        ),
-        new CsrMstatush,
+          ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 24) === 0x0C || x(31 downto 24) === 0x02 || x(31 downto 24) === 0x07)),
+        new MstatushPlugin(readOnly = false),
         new CsrPlugin(
           CsrPluginConfig.linuxFull(0x20010020l).copy(misaExtensionsInit = Riscv.misaToInt(s"imacsu"),
                                                       mvendorid = 0,
@@ -290,7 +289,7 @@ object VeronicaConfig{
     val config = default
 
     //Replace static memory translator with pmp translator
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new PmpPluginNapot(regions = 8,granularity = 8,ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 28) === 0x0))
+    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new PmpPluginNapot(regions = 8,granularity = 8, ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 24) === 0x0C || x(31 downto 24) === 0x02 || x(31 downto 24) === 0x07))
 
     config
   }
@@ -299,7 +298,7 @@ object VeronicaConfig{
     val config = default
 
     //Replace static memory translater with MMU plugin
-    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new MmuPlugin(ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 28) === 0x0))
+    config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[StaticMemoryTranslatorPlugin])) = new MmuPlugin(ioRange = (x => x(31 downto 28) === 0x4 || x(31 downto 28) === 0x7 || x(31 downto 24) === 0x0C || x(31 downto 24) === 0x02 || x(31 downto 24) === 0x07))
 
     //Change original ibus with mmu ibus
     config.cpuPlugins(config.cpuPlugins.indexWhere(_.isInstanceOf[IBusCachedPlugin])) =
@@ -484,7 +483,7 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       )
     )
     
-    val axi4busCC  = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 8, 8, 8, 8)
+    val axi4busCC  = Axi4SharedCC(configBUS.getAxi4Config(), cpuClockDomain, busClockDomain, 16, 16, 16, 16)
     
     val axiBUS = new ClockingArea(busClockDomain) {
       val clint = new AxiLite4Clint(1)
@@ -514,7 +513,7 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       val usb = UsbOhciAxi4(usb_p, busClockDomain, phyClockDomain)
       
       val axi4usb     = Axi4SharedToAxi4V(usb.ctrlParameter)
-      val axi4usbdma  = Axi4ToAxi4SharedV(configBUS.getAxi4Config().copy(idWidth = 0, useBurst = false, useLock = false, useQos = false))
+      val axi4usbdma  = Axi4ToAxi4SharedV(configBUS.getAxi4Config().copy(idWidth = 0, useLock = false, useQos = false))
       
       plic.io.sources  := BufferCC(B(usb.io.interrupt, io.irq >> 1))
       
@@ -543,8 +542,8 @@ case class Veronica (val config: VeronicaConfig) extends Component {
 
     }
     
-    val axi4mbusCC  = Axi4SharedCC(configBUS.getAxi4Config().copy(idWidth = 2), cpuClockDomain, ddrClockDomain, 8, 8, 8, 8)
-    val axi4usbdmaCC = Axi4SharedCC(configBUS.getAxi4Config().copy(idWidth = 0, useBurst = false, useLock = false, useQos = false), busClockDomain, ddrClockDomain, 8, 8, 8, 8)
+    val axi4mbusCC  = Axi4SharedCC(configBUS.getAxi4Config().copy(idWidth = 2), cpuClockDomain, ddrClockDomain, 16, 16, 16, 16)
+    val axi4usbdmaCC = Axi4SharedCC(configBUS.getAxi4Config().copy(idWidth = 0, useLock = false, useQos = false), busClockDomain, ddrClockDomain, 8, 8, 8, 8)
     
     val axiCPU = new ClockingArea(cpuClockDomain) {
     

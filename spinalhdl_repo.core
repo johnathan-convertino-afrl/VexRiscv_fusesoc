@@ -1,5 +1,5 @@
 CAPI=2:
-name : spinalhdl:repo:spinalhdl:1.10.1
+name : spinalhdl:repo:spinalhdl:1.13.0
 
 filesets:
   dep:
@@ -12,7 +12,7 @@ generate:
     parameters:
       repo_url: https://github.com/SpinalHDL/SpinalHDL.git
       repo_dir: SpinalHDL
-      tag: v1.10.1
+      tag: v1.13.0
 
 targets:
   default:
