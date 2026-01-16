@@ -192,6 +192,7 @@ object jtag_type {
 // }
 
 case class VeronicaConfig(  jtag_select : jtag_type,
+                            dma_ports   : Int = 1,
                             ddr_size    : BigInt = 1 GB,
                             ram_size    : BigInt = 16 kB,
                             rom_size    : BigInt = 16 kB,
@@ -399,7 +400,8 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       val m_axi_perf = master(AxiLite4(configBUS.getAxiLite4Config()))
       
       //dma0 port for memory access
-      val s_axi_dma0 = slave(Axi4(configBUS.getAxi4Config().copy(idWidth = 2)))
+//       val s_axi_dma0 = slave(Axi4(configBUS.getAxi4Config().copy(idWidth = 2)))
+      val s_axi_dma = Array.fill(dma_ports)(slave(new Axi4(configBUS.getAxi4Config().copy(idWidth = 2))))
       
       //usb phy
       val usb = master(UsbPhyFsNativeIo())
@@ -635,7 +637,8 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     
     val axiDDR = new ClockingArea(ddrClockDomain) {
       val axi4mbus = Axi4SharedToAxi4V(configBUS.getAxi4Config())
-      val axi4dma0 = Axi4ToAxi4SharedV(configBUS.getAxi4Config().copy(idWidth = 2))
+      
+      val axi4dma = Array.fill(dma_ports)(new Axi4ToAxi4SharedV(configBUS.getAxi4Config().copy(idWidth = 2)))
       
       val axiDdrCrossbar = Axi4CrossbarFactory()
       
@@ -645,9 +648,13 @@ case class Veronica (val config: VeronicaConfig) extends Component {
       
       axiDdrCrossbar.addConnections(
         axi4mbusCC.io.output    -> List(axi4mbus.io.input),
-        axi4dma0.io.output      -> List(axi4mbus.io.input),
         axi4usbdmaCC.io.output  -> List(axi4mbus.io.input)
       )
+      
+      for(i <- 0 until dma_ports)
+      {
+        axiDdrCrossbar.addConnections(axi4dma(i).io.output -> List(axi4mbus.io.input))
+      }
       
       axiDdrCrossbar.build()
     }
@@ -656,15 +663,21 @@ case class Veronica (val config: VeronicaConfig) extends Component {
     AxiLite4SpecRenamer(master(io.m_axi_perf) .setName("m_axi_perf"))
 
     Axi4SpecRenamer(master(io.m_axi_mbus) .setName("m_axi_mbus"))
-
-    Axi4SpecRenamer(slave(io.s_axi_dma0) .setName("s_axi_dma0"))
+    
+    for(i <- 0 until dma_ports)
+    {
+      Axi4SpecRenamer(slave(io.s_axi_dma(i)) .setName("s_axi_dma" + i.toString))
+    }
     
     axi4usbdmaCC.io.input <> axiBUS.axi4usbdma.io.output
     
     io.m_axi_acc      <> axiBUS.axi4acc.io.output
     io.m_axi_perf     <> axiBUS.axi4perf.io.output
     io.m_axi_mbus     <> axiDDR.axi4mbus.io.output
-    io.s_axi_dma0     <> axiDDR.axi4dma0.io.input
+    for(i <- 0 until dma_ports)
+    {
+      io.s_axi_dma(i)     <> axiDDR.axi4dma(i).io.input
+    }
     
     io.usb <> axiBUS.usb.io.usb(0)
 }
@@ -720,6 +733,12 @@ object Veronica_Linux_JTAG_IO{
 object Veronica_Linux{
   def main(args: Array[String]) {
     Config.spinal.generateVerilog(Veronica(VeronicaConfig.linux.copy(jtag_select = jtag_type.none)))
+  }
+}
+
+object Veronica_Linux_RF{
+  def main(args: Array[String]) {
+    Config.spinal.generateVerilog(Veronica(VeronicaConfig.linux.copy(jtag_select = jtag_type.none, dma_ports = 2)))
   }
 }
 
